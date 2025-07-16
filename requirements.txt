@@ -13,12 +13,19 @@ langchain-community==0.0.6
 # 移除chromadb依赖冲突
 # chromadb==0.4.17
 
+# LlamaIndex相关
+llama-index-core==0.10.11
+llama-index-readers-file==0.1.5
+llama-index-vector-stores-qdrant==0.1.4
+llama-index-embeddings-huggingface==0.1.4
+llama-index-llms-openai==0.1.5
+
 # 通义千问
 dashscope==1.14.1
 
 # 文档处理
-PyMuPDF==1.23.8
-pypdf==3.17.1
+PyMuPDF==1.23.21
+pypdf==4.0.1
 
 # 中文分词
 jieba==0.42.1
@@ -38,4 +45,4 @@ pytest==7.4.3
 black==23.11.0 
 
 # Qdrant向量数据库
-qdrant-client==1.7.0 
+qdrant-client==1.7.1 

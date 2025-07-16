@@ -1,37 +1,48 @@
+"""
+API数据模型定义
+"""
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
-class TaskStatus(str, Enum):
+# 状态枚举
+class DocumentStatus(str, Enum):
+    """文档处理状态枚举"""
     PENDING = "pending"
     PROCESSING = "processing" 
     COMPLETED = "completed"
     FAILED = "failed"
-    FAILED_PERMANENTLY = "failed_permanently"  # 新增永久失败状态
+    FAILED_PERMANENTLY = "failed_permanently"
 
-class DocumentUploadRequest(BaseModel):
+# 兼容旧代码的别名
+TaskStatus = DocumentStatus
+
+# 文档相关模型
+class DocumentBase(BaseModel):
+    """文档基础模型"""
     filename: str
+
+class DocumentCreate(DocumentBase):
+    """文档创建模型"""
+    id: Optional[str] = None
+    file_path: str
+    user_id: Optional[str] = "system"
+
+class DocumentUploadRequest(DocumentBase):
+    """文档上传请求"""
     content_type: str = "application/pdf"
 
 class DocumentUploadResponse(BaseModel):
+    """文档上传响应"""
     document_id: str
     filename: str
     status: TaskStatus
     upload_time: datetime
     message: str
 
-class QueryRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=1000)
-    max_results: int = Field(default=5, ge=1, le=20)
-
-class QueryResponse(BaseModel):
-    answer: str
-    confidence: float
-    sources: List[dict]
-    processing_time: float
-
 class DocumentInfo(BaseModel):
+    """文档信息"""
     document_id: str
     filename: str
     file_size: int
@@ -40,24 +51,52 @@ class DocumentInfo(BaseModel):
     upload_time: datetime
     status: TaskStatus
     chunk_count: Optional[int] = None
-    retry_count: Optional[int] = None  # 新增重试次数字段
-    max_retries: Optional[int] = None  # 新增最大重试次数字段
+    retry_count: Optional[int] = None
+    max_retries: Optional[int] = None
 
-class HealthCheck(BaseModel):
-    status: str
-    timestamp: datetime
-    services: dict
-
-# 新增文档状态响应模型
 class DocumentStatusResponse(BaseModel):
+    """文档状态响应"""
     document_id: str
     status: str
     progress: int
     message: str
     error_message: Optional[str] = None
 
-# 新增重复检测响应模型
 class DuplicateCheckResponse(BaseModel):
+    """重复检测响应"""
     is_duplicate: bool
     existing_document_id: Optional[str] = None
-    message: str 
+    message: str
+
+# 查询相关模型
+class QueryRequest(BaseModel):
+    """查询请求"""
+    question: str = Field(..., min_length=1, max_length=1000)
+    max_results: int = Field(default=5, ge=1, le=20)
+
+class QueryResponse(BaseModel):
+    """查询响应"""
+    answer: str
+    confidence: float
+    sources: List[Dict[str, Any]]
+    processing_time: float
+
+# 系统相关模型
+class HealthCheck(BaseModel):
+    """健康检查"""
+    status: str
+    timestamp: datetime
+    services: Dict[str, str]
+
+# LlamaIndex相关模型
+class LlamaIndexQueryRequest(BaseModel):
+    """LlamaIndex查询请求"""
+    query: str
+    document_id: str
+    similarity_top_k: Optional[int] = 3
+    similarity_cutoff: Optional[float] = 0.7
+
+class LlamaIndexQueryResponse(BaseModel):
+    """LlamaIndex查询响应"""
+    answer: str
+    source_nodes: List[Dict[str, Any]] 
