@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, Document as DBDocument
 from app.schemas import (
-    DocumentResponse, DocumentInfo, DocumentStatus, 
+    DocumentInfo, DocumentStatus, 
     LlamaIndexQueryRequest, LlamaIndexQueryResponse
 )
 from app.llamaindex.adapter import LlamaIndexAdapter

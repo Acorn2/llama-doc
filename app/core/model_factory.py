@@ -1,12 +1,12 @@
 import os
 from typing import Optional, Any
-from langchain.embeddings.base import Embeddings
-from langchain.llms.base import BaseLLM
+from langchain_core.embeddings import Embeddings
+from langchain_core.language_models.llms import BaseLLM
 
 # 导入不同的模型适配器
 try:
-    from langchain.chat_models import ChatOpenAI
-    from langchain.embeddings import OpenAIEmbeddings
+    from langchain_openai import ChatOpenAI
+    from langchain_openai import OpenAIEmbeddings
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False

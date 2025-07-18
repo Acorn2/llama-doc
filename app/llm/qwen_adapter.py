@@ -1,9 +1,9 @@
 import os
 import dashscope
 from typing import List, Dict, Any, Optional
-from langchain.llms.base import LLM
-from langchain.callbacks.manager import CallbackManagerForLLMRun
-from langchain.schema import Generation, LLMResult
+from langchain_core.language_models.llms import LLM
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
+from langchain_core.outputs import Generation, LLMResult
 import logging
 
 logger = logging.getLogger(__name__)

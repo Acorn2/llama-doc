@@ -100,3 +100,80 @@ class LlamaIndexQueryResponse(BaseModel):
     """LlamaIndex查询响应"""
     answer: str
     source_nodes: List[Dict[str, Any]] 
+
+# 知识库相关模式
+class KnowledgeBaseCreate(BaseModel):
+    """创建知识库请求模型"""
+    name: str = Field(..., description="知识库名称")
+    description: Optional[str] = Field(None, description="知识库描述")
+
+class KnowledgeBaseResponse(BaseModel):
+    """知识库响应模型"""
+    id: str = Field(..., description="知识库ID")
+    name: str = Field(..., description="知识库名称")
+    description: Optional[str] = Field(None, description="知识库描述")
+    create_time: datetime = Field(..., description="创建时间")
+    update_time: Optional[datetime] = Field(None, description="更新时间")
+    document_count: int = Field(0, description="文档数量")
+    status: str = Field(..., description="知识库状态")
+
+class KnowledgeBaseListResponse(BaseModel):
+    """知识库列表响应模型"""
+    items: List[KnowledgeBaseResponse] = Field(..., description="知识库列表")
+    total: int = Field(..., description="知识库总数")
+
+class DocumentAddResponse(BaseModel):
+    """添加文档到知识库响应"""
+    success: bool = Field(..., description="操作是否成功")
+    message: str = Field(..., description="操作消息")
+    kb_id: str = Field(..., description="知识库ID")
+    document_id: str = Field(..., description="文档ID")
+
+# 对话相关模式
+class ConversationCreate(BaseModel):
+    """创建对话请求模型"""
+    kb_id: str = Field(..., description="知识库ID")
+    title: Optional[str] = Field(None, description="对话标题")
+
+class ConversationResponse(BaseModel):
+    """对话响应模型"""
+    id: str = Field(..., description="对话ID")
+    kb_id: str = Field(..., description="知识库ID")
+    title: Optional[str] = Field(None, description="对话标题")
+    create_time: datetime = Field(..., description="创建时间")
+    update_time: Optional[datetime] = Field(None, description="更新时间")
+    status: str = Field(..., description="对话状态")
+
+class ConversationListResponse(BaseModel):
+    """对话列表响应模型"""
+    items: List[ConversationResponse] = Field(..., description="对话列表")
+    total: int = Field(..., description="对话总数")
+
+class MessageCreate(BaseModel):
+    """创建消息请求模型"""
+    role: str = Field(..., description="消息角色")
+    content: str = Field(..., description="消息内容")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="消息元数据")
+
+class MessageResponse(BaseModel):
+    """消息响应模型"""
+    id: str = Field(..., description="消息ID")
+    conversation_id: str = Field(..., description="对话ID")
+    role: str = Field(..., description="消息角色")
+    content: str = Field(..., description="消息内容")
+    create_time: datetime = Field(..., description="创建时间")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="消息元数据")
+
+class ChatRequest(BaseModel):
+    """对话请求模型"""
+    conversation_id: Optional[str] = Field(None, description="对话ID，如果为空则创建新对话")
+    kb_id: str = Field(..., description="知识库ID")
+    message: str = Field(..., description="用户消息")
+    use_agent: Optional[bool] = Field(False, description="是否使用Agent模式")
+
+class ChatResponse(BaseModel):
+    """对话响应模型"""
+    conversation_id: str = Field(..., description="对话ID")
+    message: MessageResponse = Field(..., description="助手回复")
+    sources: Optional[List[Dict[str, Any]]] = Field(None, description="引用来源")
+    processing_time: float = Field(..., description="处理时间") 

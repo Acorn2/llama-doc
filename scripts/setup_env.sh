@@ -70,7 +70,7 @@ fi
 echo "  API_PORT: ${API_PORT:-8000}"
 
 
-mkdir -p uploads vector_db logs
+mkdir -p logs
 
 
 if [ "$ENVIRONMENT" = "production" ]; then

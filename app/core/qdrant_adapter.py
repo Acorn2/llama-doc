@@ -34,15 +34,12 @@ class QdrantAdapter:
                 api_key=api_key
             )
             
-            # 测试连接
-            health_status = self._check_health()
-            if health_status:
-                logger.info(f"Qdrant连接成功: {host}:{port}")
-            else:
-                raise ConnectionError("Qdrant健康检查失败")
+            # 延迟健康检查，不在初始化时阻止应用启动
+            logger.info(f"Qdrant客户端已创建: {host}:{port}")
+            self._connection_verified = False
                 
         except Exception as e:
-            logger.error(f"Qdrant连接失败: {e}")
+            logger.error(f"Qdrant客户端创建失败: {e}")
             raise e
     
     def _check_health(self) -> bool:
@@ -51,14 +48,26 @@ class QdrantAdapter:
             # 尝试获取集合列表来测试连接
             collections = self.client.get_collections()
             logger.info(f"Qdrant健康检查成功，发现 {len(collections.collections)} 个集合")
+            self._connection_verified = True
             return True
         except Exception as e:
             logger.error(f"Qdrant健康检查失败: {e}")
+            self._connection_verified = False
             return False
+    
+    def ensure_connection(self) -> bool:
+        """确保连接可用，如果未验证则进行健康检查"""
+        if not self._connection_verified:
+            return self._check_health()
+        return True
     
     def create_collection(self, collection_name: str, dimension: int = 1536) -> bool:
         """创建向量集合"""
         try:
+            # 确保连接可用
+            if not self.ensure_connection():
+                logger.error("Qdrant连接不可用，无法创建集合")
+                return False
             # 检查集合是否已存在
             collections = self.client.get_collections()
             existing_names = [col.name for col in collections.collections]

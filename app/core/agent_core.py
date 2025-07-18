@@ -1,5 +1,5 @@
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from typing import List, Dict, Optional
 import time
 import logging
@@ -101,18 +101,21 @@ class DocumentAnalysisAgent:
         self, 
         document_id: str, 
         question: str, 
-        max_results: int = 5
+        search_results: List[Dict] = None,
+        max_results: int = 5,
+        use_enhanced_prompt: bool = False
     ) -> Dict:
         """回答基于文档的问题"""
         start_time = time.time()
         
         try:
-            # 1. 向量搜索相关内容
-            search_results = self.vector_store.search_similar_chunks(
-                document_id=document_id,
-                query=question,
-                k=max_results
-            )
+            # 1. 向量搜索相关内容（如果没有提供）
+            if not search_results:
+                search_results = self.vector_store.search_similar_chunks(
+                    document_id=document_id,
+                    query=question,
+                    k=max_results
+                )
             
             if not search_results:
                 return {
@@ -124,16 +127,22 @@ class DocumentAnalysisAgent:
                 }
             
             # 2. 构建上下文
-            context = self._build_context(search_results)
+            if use_enhanced_prompt and hasattr(self, '_build_enhanced_context'):
+                context = self._build_enhanced_context(search_results, question)
+            else:
+                context = self._build_context(search_results)
             
             # 3. 生成回答 - 兼容不同模型接口
             try:
                 # 尝试使用LangChain链式调用
-                chain = self.qa_prompt | self.llm | StrOutputParser()
-                answer = chain.invoke({
-                    "context": context,
-                    "question": question
-                })
+                if use_enhanced_prompt and hasattr(self, '_generate_enhanced_answer'):
+                    answer = self._generate_enhanced_answer(context, question)
+                else:
+                    chain = self.qa_prompt | self.llm | StrOutputParser()
+                    answer = chain.invoke({
+                        "context": context,
+                        "question": question
+                    })
             except Exception as e:
                 # 降级到直接调用模型
                 logger.warning(f"链式调用失败，使用直接调用: {str(e)}")
@@ -141,10 +150,16 @@ class DocumentAnalysisAgent:
                 answer = self.llm.predict(prompt_text)
             
             # 4. 计算置信度
-            confidence = self._calculate_confidence(search_results)
+            if use_enhanced_prompt and hasattr(self, '_calculate_enhanced_confidence'):
+                confidence = self._calculate_enhanced_confidence(search_results, question, answer)
+            else:
+                confidence = self._calculate_confidence(search_results)
             
             # 5. 准备源信息
-            sources = self._prepare_sources(search_results)
+            if use_enhanced_prompt and hasattr(self, '_prepare_enhanced_sources'):
+                sources = self._prepare_enhanced_sources(search_results)
+            else:
+                sources = self._prepare_sources(search_results)
             
             processing_time = time.time() - start_time
             

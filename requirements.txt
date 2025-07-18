@@ -7,34 +7,32 @@ python-multipart==0.0.6
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9  # PostgreSQL支持
 
-# LangChain相关
-langchain==0.0.335
-langchain-community==0.0.6
-# 移除chromadb依赖冲突
-# chromadb==0.4.17
-
-# LlamaIndex相关
-llama-index-core==0.10.11
-llama-index-readers-file==0.1.5
-llama-index-vector-stores-qdrant==0.1.4
-llama-index-embeddings-huggingface==0.1.4
-llama-index-llms-openai==0.1.5
+# LangChain相关 - 升级到最新稳定版本
+langchain==0.1.20
+langchain-community==0.0.38
+langchain-core==0.1.52
+langchain-openai==0.1.8
+langchain-experimental==0.0.58  # Agent功能支持
 
 # 通义千问
 dashscope==1.14.1
 
 # 文档处理
-PyMuPDF==1.23.21
+PyMuPDF==1.23.8
 pypdf==4.0.1
+unstructured==0.12.4  # LangChain文档加载器支持
 
 # 中文分词
 jieba==0.42.1
 
-# 工具库
+# 工具库 - 统一使用Pydantic v2
 pydantic==2.5.0
+pydantic-settings==2.1.0
 python-dotenv==1.0.0
 numpy==1.24.3
-tiktoken==0.5.1
+
+# Token处理
+tiktoken==0.5.2
 requests==2.31.0
 
 # 腾讯云COS SDK
@@ -45,4 +43,4 @@ pytest==7.4.3
 black==23.11.0 
 
 # Qdrant向量数据库
-qdrant-client==1.7.1 
+qdrant-client==1.7.1

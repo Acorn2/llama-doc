@@ -1,7 +1,7 @@
 import os
 import dashscope
 from typing import List
-from langchain.embeddings.base import Embeddings
+from langchain_core.embeddings import Embeddings
 import logging
 
 logger = logging.getLogger(__name__)

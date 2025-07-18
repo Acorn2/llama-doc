@@ -48,6 +48,7 @@ fi
 # 安装依赖
 echo "📦 安装依赖..."
 pip install -r requirements.txt
+# pip install --ignore-installed -r requirements.txt
 
 # 安装PostgreSQL依赖
 echo "📦 安装PostgreSQL依赖..."

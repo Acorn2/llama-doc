@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, text, Index, inspect
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, text, Index, inspect, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
@@ -143,6 +143,79 @@ class QueryHistory(Base):
     processing_time = Column(Float, default=0.0)
     query_time = Column(DateTime(timezone=True), server_default=func.now())
 
+class KnowledgeBase(Base):
+    """知识库数据模型"""
+    __tablename__ = "knowledge_bases"
+    
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    update_time = Column(DateTime(timezone=True), onupdate=func.now())
+    vector_store_name = Column(String, nullable=False)  # 对应向量库名称
+    document_count = Column(Integer, default=0)         # 包含的文档数量
+    status = Column(String, default="active")           # active, archived, deleted
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_kb_status', 'status'),
+            Index('idx_kb_create_time', 'create_time'),
+        )
+
+class KnowledgeBaseDocument(Base):
+    """知识库文档关联模型"""
+    __tablename__ = "kb_documents"
+    
+    id = Column(String, primary_key=True, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
+    add_time = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_kb_doc', 'kb_id', 'document_id'),
+        )
+
+class Conversation(Base):
+    """对话数据模型"""
+    __tablename__ = "conversations"
+    
+    id = Column(String, primary_key=True, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    title = Column(String, nullable=True)
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    update_time = Column(DateTime(timezone=True), onupdate=func.now())
+    status = Column(String, default="active")  # active, archived, deleted
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_conv_kb_id', 'kb_id'),
+            Index('idx_conv_status', 'status'),
+            Index('idx_conv_create_time', 'create_time'),
+        )
+
+class Message(Base):
+    """对话消息数据模型"""
+    __tablename__ = "messages"
+    
+    id = Column(String, primary_key=True, index=True)
+    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # user, assistant, system
+    content = Column(Text, nullable=False)
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    message_metadata = Column(Text, nullable=True)  # JSON格式的元数据，包括使用的工具、引用等
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_msg_conversation_id', 'conversation_id'),
+            Index('idx_msg_role', 'role'),
+            Index('idx_msg_create_time', 'create_time'),
+        )
+
 def get_db_session():
     """获取数据库会话，带重试机制"""
     max_retries = 3
@@ -200,7 +273,7 @@ def check_tables_exist():
         inspector = inspect(engine)
         
         # 检查核心表是否存在
-        required_tables = ["documents", "query_history"]
+        required_tables = ["documents", "query_history", "knowledge_bases", "kb_documents", "conversations", "messages"]
         existing_tables = [table for table in required_tables if inspector.has_table(table)]
         
         # 如果所有必需的表都存在，则返回True

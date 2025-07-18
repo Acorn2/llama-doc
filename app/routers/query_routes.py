@@ -26,7 +26,7 @@ router = APIRouter(
 # 创建向量存储管理器和智能体实例
 vector_store = VectorStoreManager()
 enhanced_vector_store = EnhancedVectorStore()
-agent = DocumentAnalysisAgent()
+agent = DocumentAnalysisAgent(vector_store_manager=vector_store)
 
 @router.post("/documents/{document_id}/query", response_model=QueryResponse)
 async def query_document(
