@@ -42,5 +42,8 @@ cos-python-sdk-v5==1.9.30
 pytest==7.4.3
 black==23.11.0 
 
+# 系统监控
+psutil==7.0.0
+
 # Qdrant向量数据库
 qdrant-client==1.7.1
