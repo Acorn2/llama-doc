@@ -4,10 +4,17 @@
 
 import logging
 import time
-import psutil
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends
 from datetime import datetime
+
+# 尝试导入psutil，如果失败则使用备用方案
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
 
 from app.config.settings import get_settings, AppSettings
 from app.core.container import get_agent_service
@@ -43,12 +50,20 @@ async def detailed_health_check(
     start_time = time.time()
     
     # 系统资源信息
-    system_info = {
-        "cpu_percent": psutil.cpu_percent(interval=1),
-        "memory_percent": psutil.virtual_memory().percent,
-        "disk_percent": psutil.disk_usage('/').percent,
-        "load_average": psutil.getloadavg() if hasattr(psutil, 'getloadavg') else None
-    }
+    if PSUTIL_AVAILABLE:
+        system_info = {
+            "cpu_percent": psutil.cpu_percent(interval=1),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage('/').percent,
+            "load_average": psutil.getloadavg() if hasattr(psutil, 'getloadavg') else None
+        }
+    else:
+        system_info = {
+            "cpu_percent": "unavailable (psutil not installed)",
+            "memory_percent": "unavailable (psutil not installed)",
+            "disk_percent": "unavailable (psutil not installed)",
+            "load_average": "unavailable (psutil not installed)"
+        }
     
     # Agent服务状态
     agent_cache_status = agent_service.cache_manager.get_cache_status()
@@ -128,9 +143,18 @@ async def liveness_check() -> Dict[str, Any]:
     存活检查
     检查服务是否仍在运行
     """
-    return {
-        "status": "alive",
-        "timestamp": datetime.now().isoformat(),
-        "pid": psutil.Process().pid,
-        "memory_usage": f"{psutil.Process().memory_info().rss / 1024 / 1024:.2f} MB"
-    }
+    if PSUTIL_AVAILABLE:
+        return {
+            "status": "alive",
+            "timestamp": datetime.now().isoformat(),
+            "pid": psutil.Process().pid,
+            "memory_usage": f"{psutil.Process().memory_info().rss / 1024 / 1024:.2f} MB"
+        }
+    else:
+        import os
+        return {
+            "status": "alive",
+            "timestamp": datetime.now().isoformat(),
+            "pid": os.getpid(),
+            "memory_usage": "unavailable (psutil not installed)"
+        }
