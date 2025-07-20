@@ -3,6 +3,7 @@
 """
 import logging
 import time
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -11,10 +12,16 @@ from app.database import get_db, Conversation, Message
 from app.schemas import (
     ConversationCreate, 
     MessageCreate,
-    MessageResponse
+    ChatRequest
 )
-# 明确导入带有use_agent字段的ChatRequest版本
-from app.schemas import ChatRequest, ChatResponse
+# Import MessageResponse and ChatResponse directly from the .py file to avoid package-level import
+import sys
+import importlib.util
+spec = importlib.util.spec_from_file_location("schemas_py", "app/schemas.py")
+schemas_py = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(schemas_py)
+MessageResponseSchema = schemas_py.MessageResponse
+ChatResponse = schemas_py.ChatResponse
 from app.schemas.__init__ import (
     ConversationResponse,
     ConversationListResponse
@@ -246,7 +253,7 @@ async def get_conversation_messages(
         logger.error(f"获取对话消息失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取对话消息失败: {str(e)}")
 
-@router.post("/{conversation_id}/messages", response_model=MessageResponse)
+@router.post("/{conversation_id}/messages", response_model=MessageResponseSchema)
 async def add_message(
     conversation_id: str,
     request: MessageCreate,
@@ -332,9 +339,28 @@ async def chat(
         
         processing_time = time.time() - start_time
         
+        # Convert Message object to MessageResponse dict
+        metadata = None
+        if hasattr(message, 'message_metadata') and message.message_metadata:
+            try:
+                import json
+                metadata = json.loads(message.message_metadata)
+            except Exception:
+                metadata = None
+        
+        # Create MessageResponse object using the correct schema
+        message_response = MessageResponseSchema(
+            id=message.id,
+            conversation_id=message.conversation_id,
+            role=message.role,
+            content=message.content,
+            create_time=message.create_time,
+            metadata=metadata
+        )
+        
         return ChatResponse(
             conversation_id=conversation_id,
-            message=message,
+            message=message_response,
             sources=sources,
             processing_time=processing_time
         )

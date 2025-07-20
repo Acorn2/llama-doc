@@ -115,6 +115,10 @@ app.include_router(conversation_router, prefix="/api/v1", tags=["对话管理"])
 app.include_router(health.router, tags=["健康检查"])
 app.include_router(agent_router, prefix="/api/v1", tags=["智能Agent"])
 
+# 注册测试路由
+from app.routers import test_routes
+app.include_router(test_routes.router, tags=["测试接口"])
+
 # 添加根路径处理
 @app.get("/", tags=["Root"])
 async def root():

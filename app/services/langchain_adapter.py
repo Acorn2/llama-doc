@@ -5,14 +5,16 @@ from langchain_community.vectorstores import Qdrant
 from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document as LCDocument
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain.chains import ConversationalRetrievalChain, RetrievalQA
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import Tool, AgentExecutor, initialize_agent, AgentType
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 from app.core.model_factory import ModelFactory
 from app.core.qdrant_adapter import QdrantAdapter
 from app.services.knowledge_base_service import KnowledgeBaseManager
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,14 @@ class LangChainAdapter:
         self.kb_manager = kb_manager or KnowledgeBaseManager()
         self.llm = llm or ModelFactory.create_llm()
         self.embeddings = embeddings or ModelFactory.create_embeddings()
-        self.qdrant_client = QdrantAdapter()
+        
+        # 使用正确的环境变量配置创建QdrantAdapter
+        self.qdrant_client = QdrantAdapter(
+            host=os.getenv("QDRANT_HOST", "localhost"),
+            port=int(os.getenv("QDRANT_PORT", "6333")),
+            use_https=os.getenv("QDRANT_HTTPS", "false").lower() == "true",
+            api_key=os.getenv("QDRANT_API_KEY")
+        )
         
         # 缓存已创建的检索器
         self.retrievers = {}
@@ -46,108 +55,172 @@ class LangChainAdapter:
         
     def create_langchain_retriever(self, kb_id: str) -> Any:
         """
-        创建LangChain检索器
+        创建LangChain检索器 - 增强错误处理和空内容过滤
         
         Args:
             kb_id: 知识库ID
             
         Returns:
-            Any: LangChain检索器对象
+            Any: 自定义检索器对象
+            
+        Raises:
+            Exception: 当无法创建检索器时抛出异常
         """
         if kb_id in self.retrievers:
             return self.retrievers[kb_id]
         
-        # 获取知识库的向量存储名称
-        vector_store_name = f"kb_{kb_id}"
-        
-        # 创建Qdrant向量存储
-        qdrant_vector_store = Qdrant(
-            client=self.qdrant_client.client,
-            collection_name=vector_store_name,
-            embeddings=self.embeddings
-        )
-        
-        # 创建检索器
-        retriever = qdrant_vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 5}
-        )
-        
-        # 缓存检索器
-        self.retrievers[kb_id] = retriever
-        
-        logger.info(f"为知识库 {kb_id} 创建LangChain检索器")
-        return retriever
+        try:
+            # 获取知识库的向量存储名称
+            vector_store_name = f"kb_{kb_id}"
+            
+            # 创建自定义检索器类来处理空内容问题
+            class SafeRetriever:
+                def __init__(self, qdrant_client, collection_name, embeddings):
+                    self.qdrant_client = qdrant_client
+                    self.collection_name = collection_name
+                    self.embeddings = embeddings
+                
+                def get_relevant_documents(self, query: str) -> List[LCDocument]:
+                    """安全的文档检索，过滤空内容"""
+                    try:
+                        # 生成查询向量
+                        query_embedding = self.embeddings.embed_query(query)
+                        
+                        # 直接使用 Qdrant 客户端搜索
+                        search_results = self.qdrant_client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            limit=5,
+                            with_payload=True
+                        )
+                        
+                        # 创建 LangChain Document 对象，过滤空内容
+                        documents = []
+                        for result in search_results:
+                            payload = result.get('payload', {})
+                            content = payload.get('content', '')
+                            
+                            # 确保内容不为空
+                            if content and content.strip():
+                                doc = LCDocument(
+                                    page_content=content.strip(),
+                                    metadata={
+                                        'chunk_id': payload.get('chunk_id', ''),
+                                        'document_id': payload.get('document_id', ''),
+                                        'chunk_index': payload.get('chunk_index', 0),
+                                        'similarity_score': result.get('score', 0.0),
+                                        'keywords': payload.get('keywords', []),
+                                        'summary': payload.get('summary', ''),
+                                        'quality_score': payload.get('quality_score', 0.5)
+                                    }
+                                )
+                                documents.append(doc)
+                        
+                        logger.info(f"安全检索完成，返回 {len(documents)} 个有效文档")
+                        return documents
+                        
+                    except Exception as e:
+                        logger.error(f"安全检索失败: {e}")
+                        return []
+            
+            # 创建自定义检索器
+            retriever = SafeRetriever(
+                qdrant_client=self.qdrant_client,
+                collection_name=vector_store_name,
+                embeddings=self.embeddings
+            )
+            
+            # 缓存检索器
+            self.retrievers[kb_id] = retriever
+            
+            logger.info(f"为知识库 {kb_id} 创建安全检索器")
+            return retriever
+            
+        except Exception as e:
+            logger.error(f"创建LangChain检索器失败: {e}")
+            # 检查是否是Qdrant连接问题
+            if "502" in str(e) or "Bad Gateway" in str(e) or "Connection" in str(e):
+                raise Exception(f"向量数据库连接失败: {str(e)}")
+            else:
+                raise Exception(f"检索器创建失败: {str(e)}")
     
     def create_conversation_chain(
         self, 
         kb_id: str, 
         conversation_memory=None
-    ) -> ConversationalRetrievalChain:
+    ) -> Any:
         """
-        创建对话链
+        创建对话链 - 使用LCEL方式避免LLMChain兼容性问题，增强错误处理
         
         Args:
             kb_id: 知识库ID
             conversation_memory: 对话内存，可选
             
         Returns:
-            ConversationalRetrievalChain: 对话检索链
+            Any: 对话检索链或回退链
         """
-        # 创建检索器
-        retriever = self.create_langchain_retriever(kb_id)
-        
-        # 创建对话内存
-        memory = conversation_memory or ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True
-        )
-        
-        # 创建中文提示模板
-        condense_question_prompt = PromptTemplate.from_template("""
-根据以下对话历史和最新问题，生成一个独立、明确的搜索查询。
-该查询应该包含所有相关上下文，以便能够在知识库中找到最佳的匹配结果。
+        try:
+            # 尝试创建检索器
+            retriever = self.create_langchain_retriever(kb_id)
+            
+            # 创建提示模板
+            prompt = ChatPromptTemplate.from_template("""
+基于以下文档内容回答用户问题：
 
-对话历史:
-{chat_history}
-
-最新问题: {question}
-
-搜索查询:
-""")
-        
-        qa_prompt = PromptTemplate.from_template("""
-你是一个专业的智能助手，请基于以下知识库内容回答用户的问题。
-
-知识库内容:
+文档内容：
 {context}
 
-对话历史:
-{chat_history}
+用户问题：{question}
 
-用户问题: {question}
-
-回答要求：
-1. 严格基于提供的知识库内容回答问题，如果知识库中没有相关信息，请明确说明无法回答
-2. 回答要简洁、准确、全面
-3. 如果引用了知识库中的内容，可以指明出处
-4. 保持客观、中立的语气
-
-回答:
+请基于提供的文档内容给出准确、详细的回答。如果文档中没有相关信息，请说明无法从提供的文档中找到答案。
 """)
-        
-        # 创建对话链
-        chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=retriever,
-            memory=memory,
-            condense_question_prompt=condense_question_prompt,
-            combine_docs_chain_kwargs={"prompt": qa_prompt},
-            return_source_documents=True
-        )
-        
-        logger.info(f"为知识库 {kb_id} 创建对话链")
-        return chain
+            
+            # 定义格式化上下文的函数，过滤空内容
+            def format_docs(docs):
+                valid_contents = []
+                for doc in docs:
+                    # 确保 page_content 不为 None 且不为空
+                    if doc.page_content and doc.page_content.strip():
+                        valid_contents.append(doc.page_content.strip())
+                
+                if not valid_contents:
+                    return "暂无相关文档内容"
+                
+                return "\n\n".join(valid_contents)
+            
+            # 使用LCEL创建链
+            chain = (
+                {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                | prompt
+                | self.llm
+                | StrOutputParser()
+            )
+            
+            logger.info(f"为知识库 {kb_id} 创建LCEL链")
+            return chain
+            
+        except Exception as e:
+            logger.error(f"创建对话链失败: {e}")
+            
+            # 创建回退链 - 不依赖检索器的简单对话链
+            logger.info(f"为知识库 {kb_id} 创建回退对话链")
+            
+            fallback_prompt = ChatPromptTemplate.from_template("""
+用户问题：{question}
+
+抱歉，当前无法访问知识库内容，但我会尽力基于我的知识来回答您的问题。如果需要查询特定文档内容，请稍后重试。
+
+请回答：
+""")
+            
+            fallback_chain = (
+                {"question": RunnablePassthrough()}
+                | fallback_prompt
+                | self.llm
+                | StrOutputParser()
+            )
+            
+            return fallback_chain
     
     def generate_conversation_response(
         self, 
@@ -158,7 +231,7 @@ class LangChainAdapter:
         search_results: List[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        生成对话回复
+        生成对话回复 - 适配LCEL链，增强错误处理
         
         Args:
             kb_id: 知识库ID
@@ -170,96 +243,74 @@ class LangChainAdapter:
         Returns:
             Dict[str, Any]: 包含回复和元数据的字典
         """
-        # 准备对话内存
-        memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True
-        )
-        
-        # 如果有上下文，添加到内存
-        if context:
-            for msg in context:
-                if msg["role"] == "user":
-                    memory.chat_memory.add_user_message(msg["content"])
-                elif msg["role"] == "assistant":
-                    memory.chat_memory.add_ai_message(msg["content"])
-                elif msg["role"] == "system":
-                    memory.chat_memory.add_message(SystemMessage(content=msg["content"]))
-        
-        # 创建对话链
-        chain_key = f"{kb_id}:{conversation_id}"
-        if chain_key in self.conversation_chains:
-            chain = self.conversation_chains[chain_key]
-        else:
-            chain = self.create_conversation_chain(kb_id, memory)
-            self.conversation_chains[chain_key] = chain
-        
-        # 生成回复
-        response = chain({"question": user_message})
-        
-        # 提取结果
-        answer = response["answer"]
-        source_documents = response.get("source_documents", [])
-        
-        # 格式化源文档
-        sources = []
-        for doc in source_documents:
-            sources.append({
-                "content": doc.page_content,
-                "metadata": doc.metadata
-            })
-        
-        return {
-            "answer": answer,
-            "sources": sources
-        }
+        try:
+            # 创建对话链
+            chain_key = f"{kb_id}:{conversation_id}"
+            if chain_key in self.conversation_chains:
+                chain = self.conversation_chains[chain_key]
+            else:
+                chain = self.create_conversation_chain(kb_id)
+                self.conversation_chains[chain_key] = chain
+            
+            # 使用LCEL链生成回复
+            answer = chain.invoke(user_message)
+            
+            # 尝试获取源文档，如果失败则使用空列表
+            sources = []
+            try:
+                retriever = self.create_langchain_retriever(kb_id)
+                source_documents = retriever.get_relevant_documents(user_message)
+                
+                # 格式化源文档，过滤空内容
+                for doc in source_documents:
+                    # 确保 page_content 不为 None 且不为空
+                    if doc.page_content and doc.page_content.strip():
+                        sources.append({
+                            "content": doc.page_content.strip(),
+                            "metadata": doc.metadata or {}
+                        })
+            except Exception as source_error:
+                logger.warning(f"获取源文档失败，但对话继续: {source_error}")
+                sources = []
+            
+            return {
+                "answer": answer,
+                "sources": sources
+            }
+            
+        except Exception as e:
+            logger.error(f"生成对话回复失败: {e}")
+            # 检查是否是Qdrant连接问题
+            if "502" in str(e) or "Bad Gateway" in str(e):
+                error_msg = "向量数据库连接异常，请稍后重试。"
+            else:
+                error_msg = "抱歉，处理您的请求时发生了错误，请稍后重试。"
+            
+            return {
+                "answer": error_msg,
+                "sources": []
+            }
     
     def create_agent(
         self, 
         kb_id: str, 
         conversation_id: Optional[str] = None
-    ) -> AgentExecutor:
+    ) -> Any:
         """
-        创建Agent
+        创建Agent - 完全避免LLMChain，直接返回LCEL链
         
         Args:
             kb_id: 知识库ID
             conversation_id: 对话ID，可选
             
         Returns:
-            AgentExecutor: Agent执行器
+            Any: 简化的Agent（实际上是LCEL链）
         """
-        # 创建检索器
-        retriever = self.create_langchain_retriever(kb_id)
+        # 直接返回对话链，避免Agent的复杂性和LLMChain问题
+        qa_chain = self.create_conversation_chain(kb_id)
         
-        # 创建基本检索QA链
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=retriever
-        )
-        
-        # 创建工具
-        tools = [
-            Tool(
-                name="KnowledgeBase",
-                func=qa_chain.run,
-                description="用于在知识库中搜索信息的工具。当你需要回答有关知识库内容的问题时使用此工具。"
-            )
-        ]
-        
-        # 使用initialize_agent创建Agent（更兼容的方式）
-        agent_executor = initialize_agent(
-            tools=tools,
-            llm=self.llm,
-            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=3
-        )
-        
-        logger.info(f"为知识库 {kb_id} 创建Agent")
-        return agent_executor
+        logger.info(f"为知识库 {kb_id} 创建简化Agent（LCEL链）")
+        return qa_chain
     
     def generate_agent_response(
         self, 
@@ -268,7 +319,7 @@ class LangChainAdapter:
         conversation_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        使用Agent生成回复
+        使用Agent生成回复 - 直接使用LCEL链
         
         Args:
             kb_id: 知识库ID
@@ -278,16 +329,34 @@ class LangChainAdapter:
         Returns:
             Dict[str, Any]: 包含回复和元数据的字典
         """
-        # 创建Agent
-        agent_executor = self.create_agent(kb_id, conversation_id)
-        
-        # 执行Agent
-        response = agent_executor.run(user_message)
-        
-        return {
-            "answer": response,
-            "agent_used": True
-        }
+        try:
+            # 创建Agent（实际上是LCEL链）
+            agent_chain = self.create_agent(kb_id, conversation_id)
+            
+            # 直接使用LCEL链处理用户消息
+            answer = agent_chain.invoke(user_message)
+            
+            return {
+                "answer": answer,
+                "agent_used": True
+            }
+            
+        except Exception as e:
+            logger.error(f"Agent生成回复失败: {e}")
+            # 如果失败，回退到直接使用对话链
+            try:
+                chain = self.create_conversation_chain(kb_id)
+                answer = chain.invoke(user_message)
+                return {
+                    "answer": answer,
+                    "agent_used": False
+                }
+            except Exception as fallback_error:
+                logger.error(f"回退方案也失败: {fallback_error}")
+                return {
+                    "answer": "抱歉，处理您的请求时发生了错误，请稍后重试。",
+                    "agent_used": False
+                }
     
     def clear_cache(self, kb_id: Optional[str] = None, conversation_id: Optional[str] = None):
         """

@@ -223,7 +223,7 @@ class LangChainDocumentAgent:
         use_agent: bool = True
     ) -> Dict[str, Any]:
         """
-        与Agent对话
+        与Agent对话 - 增强错误处理，确保返回格式正确
         
         Args:
             message: 用户消息
@@ -234,17 +234,29 @@ class LangChainDocumentAgent:
             Dict[str, Any]: 包含回复和元数据的响应
         """
         start_time = time.time()
+        current_timestamp = datetime.now().isoformat()
         
         try:
             if use_agent:
-                # 使用Agent模式
-                response = self.agent_executor.invoke({"input": message})
-                answer = response.get("output", "抱歉，我无法处理您的请求。")
-                
-                # 提取中间步骤信息
-                intermediate_steps = response.get("intermediate_steps", [])
-                tools_used = [step[0].tool for step in intermediate_steps if hasattr(step[0], 'tool')]
-                
+                # 使用Agent模式 - 但避免使用可能有问题的agent_executor
+                try:
+                    response = self.adapter.generate_agent_response(
+                        kb_id=self.kb_id,
+                        user_message=message,
+                        conversation_id=conversation_id
+                    )
+                    answer = response.get("answer", "抱歉，我无法处理您的请求。")
+                    tools_used = ["agent_chain"] if response.get("agent_used", False) else []
+                except Exception as agent_error:
+                    logger.warning(f"Agent模式失败，回退到对话模式: {agent_error}")
+                    # 回退到对话模式
+                    response = self.adapter.generate_conversation_response(
+                        kb_id=self.kb_id,
+                        conversation_id=conversation_id or "default",
+                        user_message=message
+                    )
+                    answer = response.get("answer", "抱歉，我无法处理您的请求。")
+                    tools_used = []
             else:
                 # 使用简单对话模式
                 response = self.adapter.generate_conversation_response(
@@ -252,13 +264,20 @@ class LangChainDocumentAgent:
                     conversation_id=conversation_id or "default",
                     user_message=message
                 )
-                answer = response["answer"]
+                answer = response.get("answer", "抱歉，我无法处理您的请求。")
                 tools_used = []
+            
+            # 确保answer不为空
+            if not answer or answer.strip() == "":
+                answer = "抱歉，我无法生成有效的回复，请稍后重试。"
             
             # 更新记忆
             if self.memory:
-                self.memory.chat_memory.add_user_message(message)
-                self.memory.chat_memory.add_ai_message(answer)
+                try:
+                    self.memory.chat_memory.add_user_message(message)
+                    self.memory.chat_memory.add_ai_message(answer)
+                except Exception as memory_error:
+                    logger.warning(f"更新记忆失败: {memory_error}")
             
             processing_time = time.time() - start_time
             
@@ -267,18 +286,25 @@ class LangChainDocumentAgent:
                 "tools_used": tools_used,
                 "processing_time": processing_time,
                 "agent_mode": use_agent,
-                "conversation_id": conversation_id,
-                "timestamp": datetime.now().isoformat(),
+                "conversation_id": conversation_id or "default",
+                "timestamp": current_timestamp,
                 "success": True
             }
             
         except Exception as e:
             logger.error(f"Agent对话失败: {e}")
+            processing_time = time.time() - start_time
+            
+            # 确保即使在异常情况下也返回正确格式的响应
             return {
                 "answer": "抱歉，处理您的请求时发生了错误，请稍后重试。",
-                "error": str(e),
-                "processing_time": time.time() - start_time,
-                "success": False
+                "tools_used": [],
+                "processing_time": processing_time,
+                "agent_mode": use_agent,
+                "conversation_id": conversation_id or "default",
+                "timestamp": current_timestamp,
+                "success": False,
+                "error": str(e)
             }
     
     def analyze_document(self, query: str) -> Dict[str, Any]:

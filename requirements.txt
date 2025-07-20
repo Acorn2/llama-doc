@@ -7,12 +7,12 @@ python-multipart==0.0.6
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9  # PostgreSQL支持
 
-# LangChain相关 - 使用兼容版本
-langchain==0.0.354
-langchain-community==0.0.20
-langchain-core==0.1.20
-langchain-openai==0.0.8
-langchain-experimental==0.0.45  # Agent功能支持
+# LangChain相关 - 升级到稳定版本
+langchain==0.1.20
+langchain-community==0.0.38
+langchain-core==0.1.52
+langchain-openai==0.1.8
+langchain-experimental==0.0.62  # Agent功能支持
 
 # 通义千问
 dashscope==1.14.1
