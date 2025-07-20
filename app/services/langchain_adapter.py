@@ -80,6 +80,16 @@ class LangChainAdapter:
                     self.collection_name = collection_name
                     self.embeddings = embeddings
                 
+                def __or__(self, other):
+                    """支持管道操作符 | 用于LCEL链"""
+                    from langchain_core.runnables import RunnableLambda
+                    
+                    def combined_func(query):
+                        docs = self.get_relevant_documents(query)
+                        return other(docs)
+                    
+                    return RunnableLambda(combined_func)
+                
                 def get_relevant_documents(self, query: str) -> List[LCDocument]:
                     """安全的文档检索，过滤空内容"""
                     try:
@@ -244,19 +254,9 @@ class LangChainAdapter:
             Dict[str, Any]: 包含回复和元数据的字典
         """
         try:
-            # 创建对话链
-            chain_key = f"{kb_id}:{conversation_id}"
-            if chain_key in self.conversation_chains:
-                chain = self.conversation_chains[chain_key]
-            else:
-                chain = self.create_conversation_chain(kb_id)
-                self.conversation_chains[chain_key] = chain
-            
-            # 使用LCEL链生成回复
-            answer = chain.invoke(user_message)
-            
-            # 尝试获取源文档，如果失败则使用空列表
+            # 先获取源文档
             sources = []
+            retrieved_docs = []
             try:
                 retriever = self.create_langchain_retriever(kb_id)
                 source_documents = retriever.get_relevant_documents(user_message)
@@ -269,9 +269,50 @@ class LangChainAdapter:
                             "content": doc.page_content.strip(),
                             "metadata": doc.metadata or {}
                         })
+                        retrieved_docs.append(doc)
+                
+                logger.info(f"获取到 {len(sources)} 个有效源文档")
             except Exception as source_error:
                 logger.warning(f"获取源文档失败，但对话继续: {source_error}")
                 sources = []
+                retrieved_docs = []
+            
+            # 如果有检索到的文档，直接使用这些文档生成回复
+            if retrieved_docs:
+                # 创建提示模板
+                prompt = ChatPromptTemplate.from_template("""
+基于以下文档内容回答用户问题：
+
+文档内容：
+{context}
+
+用户问题：{question}
+
+请基于提供的文档内容给出准确、详细的回答。如果文档中没有相关信息，请说明无法从提供的文档中找到答案。
+""")
+                
+                # 格式化文档内容
+                context_text = "\n\n".join([doc.page_content.strip() for doc in retrieved_docs])
+                
+                # 直接使用提示模板生成回复
+                formatted_prompt = prompt.format(context=context_text, question=user_message)
+                answer = self.llm.invoke(formatted_prompt)
+                
+                logger.info(f"使用 {len(retrieved_docs)} 个文档生成回复")
+            else:
+                # 如果没有检索到文档，使用回退链
+                fallback_prompt = ChatPromptTemplate.from_template("""
+用户问题：{question}
+
+抱歉，当前无法从知识库中找到相关的文档内容来回答您的问题。我会尽力基于我的知识来回答您的问题。
+
+请回答：
+""")
+                
+                formatted_prompt = fallback_prompt.format(question=user_message)
+                answer = self.llm.invoke(formatted_prompt)
+                
+                logger.info("使用回退模式生成回复")
             
             return {
                 "answer": answer,

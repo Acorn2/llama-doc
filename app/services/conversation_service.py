@@ -96,6 +96,12 @@ class ConversationManager:
             logger.error(f"无效的消息角色: {role}")
             raise ValueError(f"无效的消息角色，必须是以下之一: {', '.join(valid_roles)}")
         
+        # 获取当前对话中的最大序号
+        from sqlalchemy import func
+        max_sequence = db.query(func.max(Message.sequence_number)).filter(
+            Message.conversation_id == conversation_id
+        ).scalar() or 0
+        
         # 序列化元数据
         metadata_json = None
         if metadata:
@@ -104,12 +110,13 @@ class ConversationManager:
             except Exception as e:
                 logger.warning(f"元数据序列化失败: {e}")
         
-        # 创建消息记录
+        # 创建消息记录，序号自动递增
         message = Message(
             id=str(uuid.uuid4()),
             conversation_id=conversation_id,
             role=role,
             content=content,
+            sequence_number=max_sequence + 1,  # 新增序号字段
             message_metadata=metadata_json
         )
         
@@ -125,10 +132,11 @@ class ConversationManager:
                 "role": role,
                 "content": content,
                 "id": message.id,
+                "sequence_number": message.sequence_number,  # 添加序号到缓存
                 "metadata": metadata
             })
         
-        logger.debug(f"已添加消息到对话: {conversation_id}, 角色: {role}, 长度: {len(content)}")
+        logger.debug(f"已添加消息到对话: {conversation_id}, 角色: {role}, 序号: {message.sequence_number}, 长度: {len(content)}")
         return message
     
     def get_conversation_history(
@@ -154,11 +162,11 @@ class ConversationManager:
             logger.error(f"对话不存在: {conversation_id}")
             raise ValueError("对话不存在")
         
-        # 查询消息历史
+        # 查询消息历史，使用序号排序
         messages = db.query(Message).filter(
             Message.conversation_id == conversation_id
         ).order_by(
-            Message.create_time.asc()
+            Message.sequence_number.asc()  # 按序号升序排列
         ).limit(limit).all()
         
         return messages

@@ -205,6 +205,7 @@ class Message(Base):
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # user, assistant, system
     content = Column(Text, nullable=False)
+    sequence_number = Column(Integer, nullable=False, default=0)  # 消息在对话中的序号
     create_time = Column(DateTime(timezone=True), server_default=func.now())
     message_metadata = Column(Text, nullable=True)  # JSON格式的元数据，包括使用的工具、引用等
     
@@ -214,6 +215,7 @@ class Message(Base):
             Index('idx_msg_conversation_id', 'conversation_id'),
             Index('idx_msg_role', 'role'),
             Index('idx_msg_create_time', 'create_time'),
+            Index('idx_conversation_sequence', 'conversation_id', 'sequence_number'),  # 新增复合索引
         )
 
 def get_db_session():
