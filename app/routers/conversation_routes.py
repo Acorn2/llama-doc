@@ -10,12 +10,14 @@ from typing import List, Optional
 from app.database import get_db, Conversation, Message
 from app.schemas import (
     ConversationCreate, 
-    ConversationResponse, 
-    ConversationListResponse,
     MessageCreate,
-    MessageResponse,
-    ChatRequest,
-    ChatResponse
+    MessageResponse
+)
+# 明确导入带有use_agent字段的ChatRequest版本
+from app.schemas import ChatRequest, ChatResponse
+from app.schemas.__init__ import (
+    ConversationResponse,
+    ConversationListResponse
 )
 from app.services.conversation_service import ConversationManager
 from app.services.langchain_adapter import LangChainAdapter
@@ -56,7 +58,23 @@ async def create_conversation(
             title=request.title
         )
         
-        return conversation
+        # 转换为响应模型
+        from app.schemas.__init__ import ConversationInfo
+        
+        conversation_info = ConversationInfo(
+            id=conversation.id,
+            title=conversation.title or "新对话",
+            kb_id=conversation.kb_id,
+            message_count=0,  # 新创建的对话消息数为0
+            created_at=conversation.create_time,
+            updated_at=conversation.update_time or conversation.create_time
+        )
+        
+        return ConversationResponse(
+            success=True,
+            message="对话创建成功",
+            conversation=conversation_info
+        )
     except ValueError as e:
         logger.error(f"创建对话失败: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -82,9 +100,30 @@ async def list_conversations(
             status=status
         )
         
-        return ConversationListResponse(
-            items=result["items"],
+        # 转换为响应模型
+        from app.schemas.__init__ import ConversationInfo, ConversationList
+        
+        conversation_infos = []
+        for conv in result["items"]:
+            conversation_info = ConversationInfo(
+                id=conv.id,
+                title=conv.title or "新对话",
+                kb_id=conv.kb_id,
+                message_count=getattr(conv, 'message_count', 0),
+                created_at=conv.create_time,
+                updated_at=conv.update_time or conv.create_time
+            )
+            conversation_infos.append(conversation_info)
+        
+        conversation_list = ConversationList(
+            conversations=conversation_infos,
             total=result["total"]
+        )
+        
+        return ConversationListResponse(
+            success=True,
+            data=conversation_list,
+            message="获取对话列表成功"
         )
     except Exception as e:
         logger.error(f"获取对话列表失败: {str(e)}")
@@ -100,7 +139,23 @@ async def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
     
-    return conversation
+    # 转换为响应模型
+    from app.schemas.__init__ import ConversationInfo
+    
+    conversation_info = ConversationInfo(
+        id=conversation.id,
+        title=conversation.title or "新对话",
+        kb_id=conversation.kb_id,
+        message_count=getattr(conversation, 'message_count', 0),
+        created_at=conversation.create_time,
+        updated_at=conversation.update_time or conversation.create_time
+    )
+    
+    return ConversationResponse(
+        success=True,
+        message="获取对话详情成功",
+        conversation=conversation_info
+    )
 
 @router.put("/{conversation_id}", response_model=ConversationResponse)
 async def update_conversation(
@@ -118,7 +173,23 @@ async def update_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
     
-    return conversation
+    # 转换为响应模型
+    from app.schemas.__init__ import ConversationInfo
+    
+    conversation_info = ConversationInfo(
+        id=conversation.id,
+        title=conversation.title or "新对话",
+        kb_id=conversation.kb_id,
+        message_count=getattr(conversation, 'message_count', 0),
+        created_at=conversation.create_time,
+        updated_at=conversation.update_time or conversation.create_time
+    )
+    
+    return ConversationResponse(
+        success=True,
+        message="对话更新成功",
+        conversation=conversation_info
+    )
 
 @router.delete("/{conversation_id}")
 async def delete_conversation(
@@ -219,7 +290,8 @@ async def chat(
             conversation_id = conversation.id
         
         # 生成回复
-        if request.use_agent:
+        use_agent = getattr(request, 'use_agent', False)
+        if use_agent:
             # 使用Agent生成回复
             adapter = get_langchain_adapter()
             response = adapter.generate_agent_response(

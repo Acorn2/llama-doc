@@ -9,9 +9,11 @@ from typing import List, Optional
 from app.database import get_db, KnowledgeBase, Document
 from app.schemas import (
     KnowledgeBaseCreate, 
-    KnowledgeBaseResponse, 
-    KnowledgeBaseListResponse,
     DocumentAddResponse
+)
+from app.schemas.__init__ import (
+    KnowledgeBaseResponse,
+    KnowledgeBaseListResponse
 )
 from app.services.knowledge_base_service import KnowledgeBaseManager
 
@@ -41,7 +43,24 @@ async def create_knowledge_base(
             description=request.description
         )
         
-        return kb
+        # 转换为响应模型
+        from app.schemas.__init__ import KnowledgeBaseInfo
+        
+        kb_info = KnowledgeBaseInfo(
+            id=kb.id,
+            name=kb.name,
+            description=kb.description,
+            document_count=getattr(kb, 'document_count', 0),
+            created_at=kb.create_time,
+            updated_at=kb.update_time or kb.create_time,
+            embedding_model=getattr(kb, 'embedding_model', None)
+        )
+        
+        return KnowledgeBaseResponse(
+            success=True,
+            message="知识库创建成功",
+            knowledge_base=kb_info
+        )
     except Exception as e:
         logger.error(f"创建知识库失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"创建知识库失败: {str(e)}")
@@ -62,9 +81,31 @@ async def list_knowledge_bases(
             status=status
         )
         
-        return KnowledgeBaseListResponse(
-            items=result["items"],
+        # 转换为响应模型
+        from app.schemas.__init__ import KnowledgeBaseInfo, KnowledgeBaseList
+        
+        kb_infos = []
+        for kb in result["items"]:
+            kb_info = KnowledgeBaseInfo(
+                id=kb.id,
+                name=kb.name,
+                description=kb.description,
+                document_count=getattr(kb, 'document_count', 0),
+                created_at=kb.create_time,
+                updated_at=kb.update_time or kb.create_time,
+                embedding_model=getattr(kb, 'embedding_model', None)
+            )
+            kb_infos.append(kb_info)
+        
+        kb_list = KnowledgeBaseList(
+            knowledge_bases=kb_infos,
             total=result["total"]
+        )
+        
+        return KnowledgeBaseListResponse(
+            success=True,
+            data=kb_list,
+            message="获取知识库列表成功"
         )
     except Exception as e:
         logger.error(f"获取知识库列表失败: {str(e)}")
@@ -80,7 +121,24 @@ async def get_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
     
-    return kb
+    # 转换为响应模型
+    from app.schemas.__init__ import KnowledgeBaseInfo
+    
+    kb_info = KnowledgeBaseInfo(
+        id=kb.id,
+        name=kb.name,
+        description=kb.description,
+        document_count=getattr(kb, 'document_count', 0),
+        created_at=kb.create_time,
+        updated_at=kb.update_time or kb.create_time,
+        embedding_model=getattr(kb, 'embedding_model', None)
+    )
+    
+    return KnowledgeBaseResponse(
+        success=True,
+        message="获取知识库详情成功",
+        knowledge_base=kb_info
+    )
 
 @router.put("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def update_knowledge_base(
@@ -99,7 +157,24 @@ async def update_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="知识库不存在")
     
-    return kb
+    # 转换为响应模型
+    from app.schemas.__init__ import KnowledgeBaseInfo
+    
+    kb_info = KnowledgeBaseInfo(
+        id=kb.id,
+        name=kb.name,
+        description=kb.description,
+        document_count=getattr(kb, 'document_count', 0),
+        created_at=kb.create_time,
+        updated_at=kb.update_time or kb.create_time,
+        embedding_model=getattr(kb, 'embedding_model', None)
+    )
+    
+    return KnowledgeBaseResponse(
+        success=True,
+        message="知识库更新成功",
+        knowledge_base=kb_info
+    )
 
 @router.delete("/{kb_id}")
 async def delete_knowledge_base(
