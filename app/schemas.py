@@ -31,7 +31,7 @@ class DocumentCreate(DocumentBase):
 
 class DocumentUploadRequest(DocumentBase):
     """文档上传请求"""
-    content_type: str = "application/pdf"
+    content_type: str = "application/octet-stream"  # 默认类型，实际会根据文件类型动态设置
 
 class DocumentUploadResponse(BaseModel):
     """文档上传响应"""

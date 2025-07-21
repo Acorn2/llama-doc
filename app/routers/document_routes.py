@@ -42,8 +42,15 @@ async def upload_document(
     file_content = await file.read()
     
     # 验证文件类型
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="只支持PDF文件")
+    from app.core.document_processor import DocumentProcessor
+    doc_processor = DocumentProcessor()
+    
+    if not doc_processor.is_supported_file(file.filename):
+        supported_types = list(doc_processor.SUPPORTED_TYPES.keys())
+        raise HTTPException(
+            status_code=400, 
+            detail=f"不支持的文件类型。支持的类型: {', '.join(supported_types)}"
+        )
     
     # 验证文件大小（50MB限制）
     if len(file_content) > 50 * 1024 * 1024:
@@ -247,7 +254,8 @@ async def download_document(document_id: str, db: Session = Depends(get_db)):
     
     try:
         # 获取文件下载URL
-        download_info = file_storage_manager.get_download_url(
+        from app.utils.download_manager import download_manager
+        download_info = download_manager.get_download_url(
             document_id=document_id,
             storage_type=document.storage_type,
             file_path=document.file_path,
@@ -280,8 +288,15 @@ async def check_duplicate_document(
         file_content = await file.read()
         
         # 验证文件类型
-        if not file.filename.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="只支持PDF文件")
+        from app.core.document_processor import DocumentProcessor
+        doc_processor = DocumentProcessor()
+        
+        if not doc_processor.is_supported_file(file.filename):
+            supported_types = list(doc_processor.SUPPORTED_TYPES.keys())
+            raise HTTPException(
+                status_code=400, 
+                detail=f"不支持的文件类型。支持的类型: {', '.join(supported_types)}"
+            )
         
         # 计算MD5
         file_md5 = calculate_content_md5(file_content)

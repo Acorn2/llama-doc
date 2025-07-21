@@ -74,7 +74,7 @@ settings = get_settings()
 # 创建FastAPI应用
 app = FastAPI(
     title=settings.app_name,
-    description="基于大语言模型的PDF文献智能分析服务",
+    description="基于大语言模型的智能文档分析服务，支持PDF、TXT、DOC、DOCX文件",
     version=settings.version,
     lifespan=lifespan,
     docs_url="/docs",

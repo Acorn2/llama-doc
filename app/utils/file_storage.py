@@ -53,14 +53,22 @@ class FileStorageManager:
     def _save_to_cos(self, file_content: bytes, document_id: str, filename: str) -> Dict[str, Any]:
         """保存文件到腾讯云COS"""
         try:
-            # 构建COS对象键：documents/{document_id}.pdf
-            object_key = f"documents/{document_id}.pdf"
+            # 获取文件扩展名
+            from pathlib import Path
+            from app.core.document_processor import DocumentProcessor
+            
+            file_ext = Path(filename).suffix.lower()
+            doc_processor = DocumentProcessor()
+            content_type = doc_processor.get_content_type(filename)
+            
+            # 构建COS对象键：documents/{document_id}{ext}
+            object_key = f"documents/{document_id}{file_ext}"
             
             # 上传到COS
             result = self.cos_client.upload_file(
                 file_content=file_content,
                 object_key=object_key,
-                content_type="application/pdf"
+                content_type=content_type
             )
             
             if result["success"]:
@@ -87,8 +95,12 @@ class FileStorageManager:
     def _save_to_local(self, file_content: bytes, document_id: str, filename: str) -> Dict[str, Any]:
         """保存文件到本地"""
         try:
+            # 获取文件扩展名
+            from pathlib import Path
+            file_ext = Path(filename).suffix.lower()
+            
             # 构建本地文件路径
-            local_path = os.path.join(self.local_upload_dir, f"{document_id}.pdf")
+            local_path = os.path.join(self.local_upload_dir, f"{document_id}{file_ext}")
             
             # 写入文件
             with open(local_path, "wb") as f:

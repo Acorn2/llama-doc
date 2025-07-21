@@ -20,7 +20,7 @@ from llama_index.llms.openai import OpenAI
 
 from app.core.model_factory import get_embedding_model
 from app.core.qdrant_adapter import QdrantAdapter
-from app.llamaindex.document_loader import CustomPDFReader
+from app.llamaindex.document_loader import CustomDocumentReader
 
 logger = logging.getLogger(__name__)
 
@@ -169,23 +169,23 @@ class LlamaIndexManager:
         logger.info(f"成功加载索引，集合名称: {collection_name}")
         return index
     
-    def process_pdf(self, file_path: str, collection_name: str) -> VectorStoreIndex:
+    def process_document(self, file_path: str, collection_name: str) -> VectorStoreIndex:
         """
-        处理PDF文件并创建索引
+        处理文档文件并创建索引（支持PDF、TXT、DOC、DOCX）
         
         Args:
-            file_path: PDF文件路径
+            file_path: 文档文件路径
             collection_name: 集合名称
             
         Returns:
             VectorStoreIndex: 向量存储索引
         """
-        # 加载PDF文件
-        pdf_reader = CustomPDFReader()
-        documents = pdf_reader.load_data(file_path)
+        # 加载文档文件
+        doc_reader = CustomDocumentReader()
+        documents = doc_reader.load_data(file_path)
         
         # 提取元数据
-        metadata = pdf_reader.extract_metadata(file_path)
+        metadata = doc_reader.extract_metadata(file_path)
         
         # 为文档添加元数据
         for doc in documents:
@@ -194,4 +194,17 @@ class LlamaIndexManager:
         # 创建索引
         index = self.create_index_from_documents(documents, collection_name)
         
-        return index 
+        return index
+    
+    def process_pdf(self, file_path: str, collection_name: str) -> VectorStoreIndex:
+        """
+        处理PDF文件并创建索引（保持向后兼容）
+        
+        Args:
+            file_path: PDF文件路径
+            collection_name: 集合名称
+            
+        Returns:
+            VectorStoreIndex: 向量存储索引
+        """
+        return self.process_document(file_path, collection_name) 

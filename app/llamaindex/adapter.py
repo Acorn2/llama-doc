@@ -9,7 +9,7 @@ import uuid
 
 from app.database import get_db, Document as DBDocument
 from app.schemas import DocumentCreate, DocumentStatus
-from app.llamaindex.document_loader import CustomPDFReader
+from app.llamaindex.document_loader import CustomDocumentReader
 from app.llamaindex.index_manager import LlamaIndexManager
 from app.llamaindex.query_engine import LlamaQueryEngine
 from app.utils.file_storage import FileStorageManager
@@ -91,14 +91,14 @@ class LlamaIndexAdapter:
                 db.commit()
                 return False
             
-            # 处理PDF文件并创建索引
+            # 处理文档文件并创建索引
             collection_name = f"doc_{document_id}"
             try:
-                self.index_manager.process_pdf(file_path, collection_name)
+                self.index_manager.process_document(file_path, collection_name)
             except Exception as e:
-                logger.error(f"处理PDF文件失败: {str(e)}")
+                logger.error(f"处理文档文件失败: {str(e)}")
                 db_document.status = DocumentStatus.FAILED
-                db_document.error_message = f"处理PDF文件失败: {str(e)}"
+                db_document.error_message = f"处理文档文件失败: {str(e)}"
                 db.commit()
                 return False
             

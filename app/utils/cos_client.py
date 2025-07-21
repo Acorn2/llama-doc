@@ -35,7 +35,7 @@ class TencentCOSClient:
         
         logger.info(f"腾讯云COS客户端初始化完成 - 区域: {self.region}, 存储桶: {self.bucket_name}")
     
-    def upload_file(self, file_content: bytes, object_key: str, content_type: str = "application/pdf") -> Dict[str, Any]:
+    def upload_file(self, file_content: bytes, object_key: str, content_type: str = "application/octet-stream") -> Dict[str, Any]:
         """
         上传文件到腾讯云COS
         

@@ -21,6 +21,8 @@ dashscope==1.14.1
 PyMuPDF==1.23.8
 pypdf==4.0.1
 unstructured==0.12.4  # LangChain文档加载器支持
+python-docx==1.1.0  # Word文档处理
+docx2txt==0.8  # DOC文件处理
 
 # 中文分词
 jieba==0.42.1
