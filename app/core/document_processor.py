@@ -25,7 +25,17 @@ class DocumentProcessor:
     }
     
     def __init__(self):
-        self.pdf_reader = PyMuPDFReader()
+        # 延迟初始化，只在需要时创建pdf_reader
+        self._pdf_reader = None
+    
+    @property
+    def pdf_reader(self):
+        """懒加载PDF阅读器"""
+        if self._pdf_reader is None:
+            from llama_index.readers.file import PyMuPDFReader
+            self._pdf_reader = PyMuPDFReader()
+            logger.info("PyMuPDFReader初始化成功")
+        return self._pdf_reader
     
     def is_supported_file(self, filename: str) -> bool:
         """检查文件是否支持"""
@@ -50,17 +60,46 @@ class DocumentProcessor:
         file_ext = Path(file_path).suffix.lower()
         logger.info(f"处理文件: {file_path}, 类型: {file_ext}")
         
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            error_msg = f"文件不存在: {file_path}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        
+        # 检查文件是否为空
+        if os.path.getsize(file_path) == 0:
+            error_msg = f"文件为空: {file_path}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
         try:
             if file_ext == '.pdf':
-                return self._load_pdf(file_path)
+                try:
+                    return self._load_pdf(file_path)
+                except Exception as e:
+                    logger.error(f"PDF加载失败: {str(e)}")
+                    raise ValueError(f"文件不是有效的PDF格式: {str(e)}")
             elif file_ext == '.txt':
-                return self._load_txt(file_path)
+                try:
+                    return self._load_txt(file_path)
+                except Exception as e:
+                    logger.error(f"TXT加载失败: {str(e)}")
+                    raise ValueError(f"无法加载TXT文件: {str(e)}")
             elif file_ext in ['.doc', '.docx']:
-                return self._load_word(file_path)
+                try:
+                    return self._load_word(file_path)
+                except ImportError as e:
+                    logger.error(f"缺少Word处理库: {str(e)}")
+                    raise
+                except Exception as e:
+                    logger.error(f"Word文档加载失败: {str(e)}")
+                    raise ValueError(f"无法加载Word文档: {str(e)}")
             else:
-                raise ValueError(f"不支持的文件类型: {file_ext}")
+                error_msg = f"不支持的文件类型: {file_ext}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
         except Exception as e:
-            logger.error(f"加载文件失败: {str(e)}")
+            logger.error(f"加载文件失败: {str(e)}", exc_info=True)
             raise
     
     def _load_pdf(self, file_path: str) -> List[Document]:
@@ -71,17 +110,28 @@ class DocumentProcessor:
     
     def _load_txt(self, file_path: str) -> List[Document]:
         """加载TXT文件"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except UnicodeDecodeError:
-            # 尝试其他编码
+        logger.info(f"开始加载TXT文件: {file_path}")
+        content = None
+        
+        # 尝试不同编码读取文件
+        encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
+        last_error = None
+        
+        for encoding in encodings:
             try:
-                with open(file_path, 'r', encoding='gbk') as f:
+                with open(file_path, 'r', encoding=encoding) as f:
                     content = f.read()
-            except UnicodeDecodeError:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
+                logger.info(f"成功使用 {encoding} 编码读取TXT文件")
+                break
+            except UnicodeDecodeError as e:
+                last_error = e
+                logger.debug(f"使用 {encoding} 编码读取失败，尝试下一种编码")
+                continue
+        
+        if content is None:
+            error_msg = f"无法读取TXT文件，所有编码尝试均失败: {last_error}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # 创建Document对象
         document = Document(
@@ -89,7 +139,8 @@ class DocumentProcessor:
             metadata={
                 'file_name': os.path.basename(file_path),
                 'file_type': 'txt',
-                'file_size': os.path.getsize(file_path)
+                'file_size': os.path.getsize(file_path),
+                'encoding': encoding  # 记录成功的编码
             }
         )
         
@@ -187,10 +238,13 @@ class DocumentProcessor:
         """
         file_ext = Path(file_path).suffix.lower()
         
+        # 确保文件扩展名不带点号
+        file_type = file_ext.replace('.', '') if file_ext else 'unknown'
+        
         # 基础元数据
         metadata = {
             'file_name': os.path.basename(file_path),
-            'file_type': file_ext[1:],  # 去掉点号
+            'file_type': file_type,  # 文件类型（不含点号）
             'file_size': os.path.getsize(file_path),
             'file_path': file_path
         }
@@ -248,3 +302,167 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"提取DOCX元数据失败: {str(e)}")
             return {}
+    
+    def process_document(
+        self, 
+        document_id: str, 
+        storage_type: str, 
+        file_path: str, 
+        cos_object_key: str = None
+    ) -> Dict[str, Any]:
+        """
+        处理文档并返回处理结果
+        
+        Args:
+            document_id: 文档ID
+            storage_type: 存储类型
+            file_path: 文件路径
+            cos_object_key: COS对象键
+            
+        Returns:
+            处理结果字典
+        """
+        try:
+            # 获取文件内容
+            from app.utils.file_storage import file_storage_manager
+            
+            file_content = file_storage_manager.get_file_content(
+                document_id=document_id,
+                storage_type=storage_type,
+                file_path=file_path,
+                cos_object_key=cos_object_key
+            )
+            
+            if not file_content:
+                return {
+                    "success": False,
+                    "error": "无法获取文件内容",
+                    "chunks": [],
+                    "metadata": {},
+                    "chunk_count": 0
+                }
+            
+            # 创建临时文件
+            import tempfile
+            import os
+            from pathlib import Path
+            
+            # 从文件路径或cos_object_key获取文件扩展名
+            if cos_object_key:
+                file_ext = Path(cos_object_key).suffix
+            else:
+                file_ext = Path(file_path).suffix
+            
+            # 确保文件扩展名包含点号
+            if file_ext and not file_ext.startswith('.'):
+                file_ext = '.' + file_ext
+            
+            # 记录文件类型信息
+            file_type = file_ext.lower().replace('.', '') if file_ext else 'unknown'
+            
+            logger.info(f"创建临时文件，扩展名: {file_ext}，文件类型: {file_type}")
+            
+            temp_file_path = None
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+                
+                logger.info(f"临时文件创建成功: {temp_file_path}")
+                
+                # 加载文档
+                documents = self.load_data(temp_file_path)
+                
+                # 提取元数据
+                metadata = self.extract_metadata(temp_file_path)
+                
+                # 将文档转换为文本块
+                chunks = []
+                for doc in documents:
+                    # 简单的文本分块（可以后续优化）
+                    text = doc.text
+                    chunk_size = 1000  # 每块1000字符
+                    
+                    for i in range(0, len(text), chunk_size):
+                        chunk_text = text[i:i + chunk_size]
+                        if chunk_text.strip():
+                            chunk_index = len(chunks)
+                            # 生成UUID格式的chunk_id
+                            import uuid
+                            chunk_id = str(uuid.uuid4())
+                            
+                            chunks.append({
+                                "content": chunk_text,  # 使用content字段匹配vector_store期望
+                                "chunk_id": chunk_id,  # 使用UUID格式的chunk_id
+                                "chunk_index": chunk_index,
+                                "chunk_length": len(chunk_text),
+                                "document_id": document_id,
+                                "metadata": {
+                                    **doc.metadata,
+                                    "chunk_index": chunk_index,
+                                    "document_id": document_id
+                                }
+                            })
+                
+                # 设置页数（对于非PDF文件，设置为1）
+                if 'pages' not in metadata:
+                    if metadata.get('file_type') == 'pdf':
+                        metadata['pages'] = metadata.get('page_count', 1)
+                    else:
+                        metadata['pages'] = 1
+                
+                logger.info(f"文档处理成功，生成{len(chunks)}个文本块")
+                return {
+                    "success": True,
+                    "error": None,
+                    "chunks": chunks,
+                    "metadata": metadata,
+                    "chunk_count": len(chunks)
+                }
+            except FileNotFoundError as e:
+                # 文件不存在错误
+                logger.error(f"文件不存在: {str(e)}")
+                return {
+                    "success": False,
+                    "error": f"文件不存在: {str(e)}",
+                    "chunks": [],
+                    "metadata": {},
+                    "chunk_count": 0
+                }
+            except ValueError as e:
+                # 值错误（包括文件格式错误）
+                logger.error(f"文件格式或值错误: {str(e)}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "chunks": [],
+                    "metadata": {},
+                    "chunk_count": 0
+                }
+            except Exception as e:
+                # 其他未预期的错误
+                logger.error(f"处理文档时发生未知错误: {str(e)}", exc_info=True)
+                return {
+                    "success": False,
+                    "error": f"处理文档失败: {str(e)}",
+                    "chunks": [],
+                    "metadata": {},
+                    "chunk_count": 0
+                }
+            finally:
+                # 清理临时文件
+                try:
+                    if temp_file_path and os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+                        logger.debug(f"已清理临时文件: {temp_file_path}")
+                except Exception as e:
+                    logger.warning(f"清理临时文件失败: {str(e)}")
+        except Exception as e:
+            logger.error(f"处理文档过程中发生异常: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"处理文档失败: {str(e)}",
+                "chunks": [],
+                "metadata": {},
+                "chunk_count": 0
+            }

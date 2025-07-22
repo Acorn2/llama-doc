@@ -2,6 +2,53 @@
 
 echo "🚀 启动PDF文献分析智能体系统（本地开发环境 - SQLite）..."
 
+# 定义清理函数
+cleanup_and_exit() {
+    echo '🛑 正在停止服务...'
+    # 终止主进程
+    if [ ! -z "$API_PID" ]; then
+        kill $API_PID 2>/dev/null || true
+        echo "✅ 主进程($API_PID)已停止"
+    fi
+    
+    # 查找并终止所有相关的uvicorn进程
+    echo "🧹 清理所有uvicorn相关进程..."
+    pkill -f "uvicorn app.main:app" || true
+    sleep 1
+    
+    # 确认所有进程已停止
+    if pgrep -f "uvicorn app.main:app" > /dev/null; then
+        echo "⚠️ 部分进程可能仍在运行，强制终止..."
+        pkill -9 -f "uvicorn app.main:app" || true
+    fi
+    
+    echo '👋 服务已完全停止'
+    exit 0
+}
+
+# 注册信号处理
+trap cleanup_and_exit INT TERM
+
+# 清理可能存在的uvicorn进程
+echo "🧹 清理可能存在的旧进程..."
+pkill -f "uvicorn app.main:app" || true
+sleep 1
+
+# 检查端口占用情况
+PORT=${API_PORT:-8000}
+if lsof -i :$PORT > /dev/null 2>&1; then
+    echo "⚠️ 端口 $PORT 已被占用，尝试释放..."
+    lsof -i :$PORT -t | xargs kill -9 2>/dev/null || true
+    sleep 2
+    
+    if lsof -i :$PORT > /dev/null 2>&1; then
+        echo "❌ 端口 $PORT 仍被占用，请检查或使用其他端口"
+        exit 1
+    else
+        echo "✅ 端口 $PORT 已释放"
+    fi
+fi
+
 # 调用环境设置脚本
 ./scripts/setup_env.sh development
 
@@ -71,5 +118,5 @@ echo "🔧 数据库信息: http://localhost:${API_PORT:-8000}/api/v1/database/i
 echo ""
 echo "按 Ctrl+C 停止服务"
 
-trap "echo '🛑 正在停止服务...'; kill $API_PID 2>/dev/null; exit" INT
-wait 
+# 等待进程结束或信号
+wait $API_PID 

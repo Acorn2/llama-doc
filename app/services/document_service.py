@@ -136,6 +136,15 @@ class DocumentTaskProcessor:
             # 获取处理组件
             processor = DocumentProcessor()
             
+            # 获取文件扩展名
+            from pathlib import Path
+            if document.cos_object_key:
+                file_ext = Path(document.cos_object_key).suffix.lower()
+            else:
+                file_ext = Path(document.file_path).suffix.lower()
+            
+            logger.info(f"处理文档类型: {file_ext}, 文件名: {document.filename}")
+            
             # 根据环境变量选择模型类型
             embedding_type = os.getenv("EMBEDDING_TYPE", "qwen")
             vector_store = VectorStoreManager(
@@ -154,23 +163,43 @@ class DocumentTaskProcessor:
             )
             
             if result["success"]:
-                # 创建向量存储
-                vector_store.create_document_collection(document_id)
-                vector_store.add_document_chunks(document_id, result["chunks"])
-                
-                # 更新数据库状态
-                document.status = "completed"
-                document.pages = result["metadata"]["pages"]
-                document.chunk_count = result["chunk_count"]
-                document.process_end_time = datetime.now()
-                # 成功后清空错误信息
-                document.error_message = None
-                db.commit()
-                
-                if is_retry:
-                    logger.info(f"文档 {document_id} 重试处理成功")
-                else:
-                    logger.info(f"文档 {document_id} 处理完成")
+                try:
+                    # 创建向量存储
+                    logger.info(f"创建文档向量集合: {document_id}")
+                    create_result = vector_store.create_document_collection(document_id)
+                    if not create_result:
+                        raise Exception("创建向量集合失败")
+                    
+                    # 添加向量
+                    logger.info(f"添加文档块到向量存储，共{len(result['chunks'])}个块")
+                    add_result = vector_store.add_document_chunks(document_id, result["chunks"])
+                    if not add_result:
+                        raise Exception("添加向量数据失败")
+                    
+                    # 更新数据库状态
+                    document.status = "completed"
+                    document.pages = result["metadata"]["pages"]
+                    document.chunk_count = result["chunk_count"]
+                    document.process_end_time = datetime.now()
+                    # 如果文件类型字段为空，从元数据中获取
+                    if not document.file_type and result["metadata"].get("file_type"):
+                        document.file_type = result["metadata"]["file_type"]
+                    # 成功后清空错误信息
+                    document.error_message = None
+                    db.commit()
+                    
+                    if is_retry:
+                        logger.info(f"文档 {document_id} 重试处理成功，共{result['chunk_count']}个文本块")
+                    else:
+                        logger.info(f"文档 {document_id} 处理完成，共{result['chunk_count']}个文本块")
+                except Exception as ve:
+                    # 向量化失败
+                    logger.error(f"向量化处理失败: {str(ve)}")
+                    document.status = "failed"
+                    error_msg = f"向量化处理失败: {str(ve)}"
+                    document.error_message = error_msg
+                    db.commit()
+                    logger.error(f"文档 {document_id} 向量化失败: {error_msg}")
             else:
                 # 处理失败
                 if document.retry_count >= document.max_retries:
@@ -185,7 +214,7 @@ class DocumentTaskProcessor:
                 document.error_message = error_msg
                 db.commit()
         except Exception as e:
-            logger.error(f"处理文档 {document_id} 时发生异常: {str(e)}")
+            logger.error(f"处理文档 {document_id} 时发生异常: {str(e)}", exc_info=True)
             # 更新文档状态为失败
             try:
                 document = db.query(Document).filter(Document.id == document_id).first()

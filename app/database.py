@@ -103,6 +103,7 @@ class Document(Base):
     upload_time = Column(DateTime(timezone=True), server_default=func.now())
     status = Column(String, default="pending")
     chunk_count = Column(Integer, default=0)
+    file_type = Column(String, nullable=True)  # 文件类型：pdf, txt, doc, docx 等
     
     # 腾讯云COS相关字段
     cos_object_key = Column(String, nullable=True)  # COS对象键
@@ -128,6 +129,7 @@ class Document(Base):
             Index('idx_status_retry', 'status', 'retry_count'),
             Index('idx_cos_object_key', 'cos_object_key'),  # 新增COS对象键索引
             Index('idx_storage_type', 'storage_type'),      # 新增存储类型索引
+            Index('idx_file_type', 'file_type'),           # 新增文件类型索引
         )
     # SQLite 的索引会在数据库创建时自动处理
 

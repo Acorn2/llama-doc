@@ -43,6 +43,9 @@ async def upload_document(
     
     # 验证文件类型
     from app.core.document_processor import DocumentProcessor
+    from app.schemas import FileType
+    from pathlib import Path
+    
     doc_processor = DocumentProcessor()
     
     if not doc_processor.is_supported_file(file.filename):
@@ -52,6 +55,10 @@ async def upload_document(
             detail=f"不支持的文件类型。支持的类型: {', '.join(supported_types)}"
         )
     
+    # 获取文件扩展名并确定文件类型
+    file_ext = Path(file.filename).suffix.lower()
+    file_type = FileType.from_extension(file_ext)
+    
     # 验证文件大小（50MB限制）
     if len(file_content) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="文件大小不能超过50MB")
@@ -59,7 +66,7 @@ async def upload_document(
     try:
         # 计算MD5等不涉及数据库的操作
         file_md5 = calculate_content_md5(file_content)
-        logger.info(f"文件 {file.filename} MD5: {file_md5}")
+        logger.info(f"文件 {file.filename} MD5: {file_md5}, 类型: {file_type}")
         
         # 检查是否存在重复文件
         existing_doc_id = is_duplicate_file(db, file_md5)
@@ -74,6 +81,7 @@ async def upload_document(
                 filename=existing_doc.filename,
                 status=TaskStatus(existing_doc.status),
                 upload_time=existing_doc.upload_time,
+                file_type=FileType(existing_doc.file_type) if existing_doc.file_type else None,
                 message=f"文件已存在，状态: {existing_doc.status}（重复检测基于MD5）"
             )
         
@@ -100,6 +108,7 @@ async def upload_document(
                 file_size=storage_result["file_size"],
                 file_md5=file_md5,
                 status="pending",
+                file_type=file_type.value,  # 设置文件类型
                 # COS相关字段
                 cos_object_key=storage_result["cos_object_key"],
                 cos_file_url=storage_result["cos_file_url"],
@@ -110,13 +119,14 @@ async def upload_document(
             db.commit()
             
             storage_info = "腾讯云COS" if storage_result["storage_type"] == "cos" else "本地存储"
-            logger.info(f"新文档上传成功({storage_info})，等待处理: {document_id}")
+            logger.info(f"新文档上传成功({storage_info})，类型: {file_type.value}，等待处理: {document_id}")
             
             return DocumentUploadResponse(
                 document_id=document_id,
                 filename=file.filename,
                 status=TaskStatus.PENDING,
                 upload_time=datetime.now(),
+                file_type=file_type,
                 message=f"文档上传成功({storage_info})，正在等待处理..."
             )
         except Exception as db_error:
@@ -172,6 +182,8 @@ async def get_document_info(document_id: str, db: Session = Depends(get_db)):
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
     
+    from app.schemas import FileType
+    
     return DocumentInfo(
         document_id=document.id,
         filename=document.filename,
@@ -180,6 +192,7 @@ async def get_document_info(document_id: str, db: Session = Depends(get_db)):
         pages=document.pages,
         upload_time=document.upload_time,
         status=TaskStatus(document.status),
+        file_type=FileType(document.file_type) if document.file_type else None,
         chunk_count=document.chunk_count,
         retry_count=document.retry_count,
         max_retries=document.max_retries
@@ -190,6 +203,8 @@ async def list_documents(skip: int = 0, limit: int = 20, db: Session = Depends(g
     """获取文档列表"""
     documents = db.query(Document).offset(skip).limit(limit).all()
     
+    from app.schemas import FileType
+    
     return [
         DocumentInfo(
             document_id=doc.id,
@@ -199,6 +214,7 @@ async def list_documents(skip: int = 0, limit: int = 20, db: Session = Depends(g
             pages=doc.pages,
             upload_time=doc.upload_time,
             status=TaskStatus(doc.status),
+            file_type=FileType(doc.file_type) if doc.file_type else None,
             chunk_count=doc.chunk_count,
             retry_count=doc.retry_count,
             max_retries=doc.max_retries

@@ -15,6 +15,36 @@ class DocumentStatus(str, Enum):
     FAILED = "failed"
     FAILED_PERMANENTLY = "failed_permanently"
 
+# 文件类型枚举
+class FileType(str, Enum):
+    """文件类型枚举"""
+    PDF = "pdf"
+    TXT = "txt"
+    DOC = "doc"
+    DOCX = "docx"
+    UNKNOWN = "unknown"
+    
+    @classmethod
+    def from_extension(cls, extension: str) -> 'FileType':
+        """从文件扩展名获取文件类型"""
+        if not extension:
+            return cls.UNKNOWN
+        
+        extension = extension.lower().strip()
+        if extension.startswith('.'):
+            extension = extension[1:]
+            
+        if extension == 'pdf':
+            return cls.PDF
+        elif extension == 'txt':
+            return cls.TXT
+        elif extension == 'doc':
+            return cls.DOC
+        elif extension == 'docx':
+            return cls.DOCX
+        else:
+            return cls.UNKNOWN
+
 # 兼容旧代码的别名
 TaskStatus = DocumentStatus
 
@@ -28,6 +58,7 @@ class DocumentCreate(DocumentBase):
     id: Optional[str] = None
     file_path: str
     user_id: Optional[str] = "system"
+    file_type: Optional[FileType] = None
 
 class DocumentUploadRequest(DocumentBase):
     """文档上传请求"""
@@ -40,6 +71,7 @@ class DocumentUploadResponse(BaseModel):
     status: TaskStatus
     upload_time: datetime
     message: str
+    file_type: Optional[FileType] = None
 
 class DocumentInfo(BaseModel):
     """文档信息"""
@@ -50,6 +82,7 @@ class DocumentInfo(BaseModel):
     pages: int
     upload_time: datetime
     status: TaskStatus
+    file_type: Optional[FileType] = None
     chunk_count: Optional[int] = None
     retry_count: Optional[int] = None
     max_retries: Optional[int] = None

@@ -1,5 +1,6 @@
 import os
 import logging
+import uuid
 from typing import List, Dict, Optional, Any
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -121,8 +122,22 @@ class QdrantAdapter:
         try:
             qdrant_points = []
             for point in points:
+                # 确保ID是有效的UUID格式
+                point_id = point.get('id')
+                if point_id:
+                    # 如果提供了ID，验证是否为有效UUID
+                    try:
+                        uuid.UUID(point_id)
+                        final_id = point_id
+                    except ValueError:
+                        # 如果不是有效UUID，生成一个新的UUID
+                        final_id = str(uuid.uuid4())
+                else:
+                    # 如果没有提供ID，生成一个新的UUID
+                    final_id = str(uuid.uuid4())
+                
                 qdrant_point = PointStruct(
-                    id=point.get('id', hashlib.md5(str(point).encode()).hexdigest()),
+                    id=final_id,
                     vector=point['vector'],
                     payload=point.get('payload', {})
                 )
