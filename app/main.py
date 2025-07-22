@@ -28,7 +28,7 @@ from app.routers import agent_router
 from app.api import health
 
 # 配置日志
-setup_logging()
+setup_logging(log_level="DEBUG")
 logger = logging.getLogger(__name__)
 
 # 定义lifespan上下文管理器，整合新旧架构
@@ -44,8 +44,17 @@ async def lifespan(app: FastAPI):
     
     # 初始化数据库（原有功能）
     logger.info("正在初始化数据库...")
-    create_tables()
-    logger.info("✅ 数据库初始化完成")
+    try:
+        create_tables()
+        logger.info("✅ 数据库初始化完成")
+    except Exception as e:
+        logger.error(f"❌ 数据库初始化失败: {str(e)}")
+        # 在生产环境可以根据需要决定是否允许应用继续启动
+        if settings.environment == "production":
+            logger.critical("生产环境数据库初始化失败，应用无法正常运行")
+            raise
+        else:
+            logger.warning("非生产环境，尽管数据库初始化失败，应用将尝试继续运行")
     
     # 启动文档处理轮询（原有功能）
     logger.info("正在启动文档处理服务...")
@@ -146,9 +155,6 @@ app.add_middleware(RequestLoggingMiddleware)
 
 # 注册新架构的异常处理器
 register_exception_handlers(app)
-
-# 创建数据库表（保留原有功能）
-create_tables()
 
 # 注册路由 - 原有路由
 app.include_router(document_router, prefix="/api/v1", tags=["文档管理"])

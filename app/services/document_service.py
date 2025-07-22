@@ -14,7 +14,8 @@ from app.core.vector_store import VectorStoreManager
 import os
 
 # 配置日志
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
+logger = logging.getLogger("app.services.document_service")
 
 class DocumentTaskProcessor:
     """定时任务文档处理器"""

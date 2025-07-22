@@ -11,7 +11,8 @@ from llama_index.core.schema import Document
 from llama_index.readers.file import PyMuPDFReader
 from llama_index.core import SimpleDirectoryReader
 
-logger = logging.getLogger(__name__)
+# 修改logger名称，确保与日志配置中一致
+logger = logging.getLogger("app.core.document_processor")
 
 class DocumentProcessor:
     """通用文档处理器，支持多种文件格式"""
@@ -71,22 +72,34 @@ class DocumentProcessor:
             error_msg = f"文件为空: {file_path}"
             logger.error(error_msg)
             raise ValueError(error_msg)
+        
+        # 检查文件扩展名是否在支持列表中
+        if file_ext not in self.SUPPORTED_TYPES:
+            error_msg = f"文件扩展名不在支持列表中: {file_ext}, 支持的类型: {list(self.SUPPORTED_TYPES.keys())}"
+            logger.warning(error_msg)
+            # 根据文件路径尝试识别真实类型
+            # 这里不直接报错，而是记录警告并继续尝试处理
             
         try:
+            logger.info(f"正在处理文件: {file_path}, 扩展名: {file_ext}")
+            
             if file_ext == '.pdf':
                 try:
+                    logger.info("开始加载PDF文档...")
                     return self._load_pdf(file_path)
                 except Exception as e:
                     logger.error(f"PDF加载失败: {str(e)}")
                     raise ValueError(f"文件不是有效的PDF格式: {str(e)}")
             elif file_ext == '.txt':
                 try:
+                    logger.info("开始加载TXT文档...")
                     return self._load_txt(file_path)
                 except Exception as e:
                     logger.error(f"TXT加载失败: {str(e)}")
                     raise ValueError(f"无法加载TXT文件: {str(e)}")
             elif file_ext in ['.doc', '.docx']:
                 try:
+                    logger.info(f"开始加载Word文档({file_ext})...")
                     return self._load_word(file_path)
                 except ImportError as e:
                     logger.error(f"缺少Word处理库: {str(e)}")
@@ -349,29 +362,121 @@ class DocumentProcessor:
             
             # 从文件路径或cos_object_key获取文件扩展名
             if cos_object_key:
-                file_ext = Path(cos_object_key).suffix
+                file_ext = Path(cos_object_key).suffix.lower()
             else:
-                file_ext = Path(file_path).suffix
+                file_ext = Path(file_path).suffix.lower()
             
-            # 确保文件扩展名包含点号
-            if file_ext and not file_ext.startswith('.'):
+            # 确保文件扩展名包含点号且为小写
+            if not file_ext:
+                # 如果没有扩展名，尝试从文件名推断
+                if cos_object_key:
+                    logger.warning(f"COS对象键 {cos_object_key} 没有扩展名")
+                else:
+                    logger.warning(f"文件路径 {file_path} 没有扩展名")
+                # 默认为txt，避免后续处理出错
+                file_ext = ".txt"
+            elif not file_ext.startswith('.'):
                 file_ext = '.' + file_ext
             
+            file_ext = file_ext.lower()
+            
+            # 检查文件扩展名是否在支持列表中
+            if file_ext not in self.SUPPORTED_TYPES:
+                logger.warning(f"文件扩展名 {file_ext} 不在支持列表中: {list(self.SUPPORTED_TYPES.keys())}")
+            
             # 记录文件类型信息
-            file_type = file_ext.lower().replace('.', '') if file_ext else 'unknown'
+            file_type = file_ext.replace('.', '') if file_ext else 'unknown'
             
             logger.info(f"创建临时文件，扩展名: {file_ext}，文件类型: {file_type}")
             
             temp_file_path = None
             try:
+                # 确保临时文件有正确的扩展名
                 with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
                 
                 logger.info(f"临时文件创建成功: {temp_file_path}")
                 
+                # 验证临时文件是否有正确的扩展名
+                temp_file_ext = Path(temp_file_path).suffix.lower()
+                logger.info(f"临时文件扩展名: {temp_file_ext}，期望扩展名: {file_ext}")
+                
+                if temp_file_ext != file_ext:
+                    logger.warning(f"临时文件扩展名 {temp_file_ext} 与期望不符 {file_ext}，可能会影响文件类型识别")
+                
                 # 加载文档
-                documents = self.load_data(temp_file_path)
+                try:
+                    documents = self.load_data(temp_file_path)
+                except FileNotFoundError as e:
+                    logger.error(f"临时文件不存在: {str(e)}")
+                    return {
+                        "success": False,
+                        "error": f"临时文件不存在: {str(e)}",
+                        "chunks": [],
+                        "metadata": {},
+                        "chunk_count": 0
+                    }
+                except ValueError as e:
+                    if "文件不是有效的PDF格式" in str(e) and file_ext != ".pdf":
+                        # 特殊处理：文件扩展名与处理方法不匹配
+                        logger.error(f"文件扩展名 {file_ext} 与实际内容不匹配，尝试作为txt处理")
+                        
+                        # 尝试作为TXT处理
+                        try:
+                            # 尝试以不同编码读取文本内容
+                            content = None
+                            encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
+                            for encoding in encodings:
+                                try:
+                                    with open(temp_file_path, 'r', encoding=encoding) as f:
+                                        content = f.read()
+                                    if content:
+                                        break
+                                except UnicodeDecodeError:
+                                    continue
+                            
+                            if content:
+                                # 创建Document对象
+                                document = Document(
+                                    text=content,
+                                    metadata={
+                                        'file_name': os.path.basename(file_path or cos_object_key or "unknown"),
+                                        'file_type': 'txt',
+                                        'file_size': os.path.getsize(temp_file_path),
+                                        'encoding': encoding
+                                    }
+                                )
+                                documents = [document]
+                                logger.info(f"作为文本文件处理成功，内容长度: {len(content)}")
+                            else:
+                                # 如果所有编码都失败，返回原错误
+                                logger.error(f"作为文本处理也失败")
+                                return {
+                                    "success": False,
+                                    "error": str(e),
+                                    "chunks": [],
+                                    "metadata": {},
+                                    "chunk_count": 0
+                                }
+                        except Exception as txt_e:
+                            logger.error(f"尝试作为文本处理失败: {str(txt_e)}")
+                            return {
+                                "success": False,
+                                "error": f"文件处理失败: {str(e)}，尝试作为文本处理也失败: {str(txt_e)}",
+                                "chunks": [],
+                                "metadata": {},
+                                "chunk_count": 0
+                            }
+                    else:
+                        # 其他值错误，直接返回
+                        return {
+                            "success": False,
+                            "error": str(e),
+                            "chunks": [],
+                            "metadata": {},
+                            "chunk_count": 0
+                        }
                 
                 # 提取元数据
                 metadata = self.extract_metadata(temp_file_path)

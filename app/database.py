@@ -254,8 +254,13 @@ def get_db_session():
 get_db = get_db_session
 
 def create_tables():
-    """创建数据库表"""
+    """创建数据库表，仅在表不存在时创建"""
     try:
+        # 首先检查表是否已存在
+        if check_tables_exist():
+            logger.info("数据库表已存在，跳过创建")
+            return
+            
         logger.info(f"开始创建数据库表 (数据库类型: {DB_TYPE}, URL: {DATABASE_URL})")
         Base.metadata.create_all(bind=engine)
         logger.info("数据库表创建成功")
@@ -287,7 +292,8 @@ def check_tables_exist():
             logger.info("数据库表检查: 所有必需的表都已存在")
         else:
             missing_tables = set(required_tables) - set(existing_tables)
-            logger.info(f"数据库表检查: 缺少以下表: {', '.join(missing_tables)}")
+            logger.warning(f"数据库表检查: 缺少以下表: {', '.join(missing_tables)}")
+            logger.info(f"数据库表检查: 已存在的表: {', '.join(existing_tables) if existing_tables else '无'}")
         
         return tables_exist
     except Exception as e:
