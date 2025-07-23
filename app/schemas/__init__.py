@@ -22,6 +22,15 @@ from .agent_schemas import (
     AgentStatusResponse
 )
 
+# 流式对话相关模型
+class ChatStreamChunk(BaseModel):
+    """流式对话响应块"""
+    conversation_id: str = Field(..., description="对话ID")
+    content: str = Field(..., description="内容块")
+    is_final: bool = Field(False, description="是否为最后一块")
+    sources: Optional[List[Dict[str, Any]]] = Field(None, description="引用来源，仅在最后一块包含")
+    processing_time: Optional[float] = Field(None, description="处理时间，仅在最后一块包含")
+
 # 为了兼容性，在这里重新定义原有的文档模式
 class DocumentStatus(str, Enum):
     """文档处理状态枚举"""
@@ -132,20 +141,27 @@ class DocumentListResponse(BaseModel):
 
 # 基础对话模型（兼容性）
 class ChatRequest(BaseModel):
-    """对话请求"""
-    message: str
-    conversation_id: Optional[str] = None
-
-class ChatResponse(BaseModel):
-    """对话响应"""
-    answer: str
-    conversation_id: str
-    timestamp: datetime
+    """对话请求模型"""
+    conversation_id: Optional[str] = Field(None, description="对话ID，如果为空则创建新对话")
+    kb_id: str = Field(..., description="知识库ID")
+    message: str = Field(..., description="用户消息")
+    use_agent: Optional[bool] = Field(False, description="是否使用Agent模式")
 
 class MessageResponse(BaseModel):
-    """消息响应"""
-    message: str
-    success: bool = True
+    """消息响应模型"""
+    id: str = Field(..., description="消息ID")
+    conversation_id: str = Field(..., description="对话ID")
+    role: str = Field(..., description="消息角色")
+    content: str = Field(..., description="消息内容")
+    create_time: datetime = Field(..., description="创建时间")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="消息元数据")
+
+class ChatResponse(BaseModel):
+    """对话响应模型"""
+    conversation_id: str = Field(..., description="对话ID")
+    message: MessageResponse = Field(..., description="助手回复")
+    sources: Optional[List[Dict[str, Any]]] = Field(None, description="引用来源")
+    processing_time: float = Field(..., description="处理时间")
 
 # 查询模型（兼容性）
 class QueryRequest(BaseModel):
@@ -349,6 +365,8 @@ __all__ = [
     "SummaryResponse",
     "ConversationHistoryResponse",
     "AgentStatusResponse",
+    # 流式对话相关
+    "ChatStreamChunk",
     # 原有的文档模式（兼容性）
     "DocumentStatus",
     "TaskStatus",
@@ -364,7 +382,7 @@ __all__ = [
     "DocumentListResponse",
     # 对话模式（兼容性）
     "ChatRequest",
-    "ChatResponse",
+    "ChatResponse", 
     "MessageResponse",
     # 查询模式（兼容性）
     "QueryRequest",

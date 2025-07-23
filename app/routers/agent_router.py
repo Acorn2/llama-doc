@@ -5,6 +5,7 @@ Agent API路由
 
 import logging
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from app.schemas.agent_schemas import (
     AgentChatRequest, AgentChatResponse,
@@ -13,6 +14,7 @@ from app.schemas.agent_schemas import (
     SummaryRequest, SummaryResponse,
     ConversationHistoryResponse, AgentStatusResponse
 )
+from app.schemas import ChatStreamChunk
 from app.services.agent_service import AgentService
 from app.api.dependencies import get_agent_service_dep, handle_service_exceptions
 
@@ -144,3 +146,78 @@ async def get_agent_status(
         llm_type=llm_type
     )
     return result
+
+@router.post("/chat/stream", summary="Agent流式对话")
+@handle_service_exceptions
+async def agent_chat_stream(
+    request: AgentChatRequest,
+    agent_service: AgentService = Depends(get_agent_service_dep)
+):
+    """
+    Agent流式对话接口
+    支持实时流式输出
+    """
+    import json
+    import time
+    
+    start_time = time.time()
+    
+    # 这里需要修改AgentService以支持流式输出
+    # 目前先返回模拟的流式响应
+    async def generate_stream():
+        try:
+            # 调用非流式Agent服务获取完整回复
+            result = await agent_service.chat_with_agent(
+                kb_id=request.kb_id,
+                message=request.message,
+                conversation_id=request.conversation_id,
+                use_agent=request.use_agent,
+                llm_type=request.llm_type
+            )
+            
+            if result["success"]:
+                answer = result["data"]["answer"]
+                # 将完整回复分块发送
+                chunk_size = 50
+                for i in range(0, len(answer), chunk_size):
+                    chunk = answer[i:i+chunk_size]
+                    chunk_data = ChatStreamChunk(
+                        conversation_id=request.conversation_id or "new",
+                        content=chunk,
+                        is_final=False
+                    )
+                    yield f"data: {chunk_data.model_dump_json()}\n\n"
+                    time.sleep(0.05)  # 模拟流式延迟
+                
+                # 发送最终块
+                final_chunk = ChatStreamChunk(
+                    conversation_id=request.conversation_id or "new",
+                    content="",
+                    is_final=True,
+                    processing_time=time.time() - start_time
+                )
+                yield f"data: {final_chunk.model_dump_json()}\n\n"
+            else:
+                # 错误情况
+                error_chunk = ChatStreamChunk(
+                    conversation_id=request.conversation_id or "new",
+                    content="抱歉，处理您的请求时发生了错误。",
+                    is_final=True,
+                    processing_time=time.time() - start_time
+                )
+                yield f"data: {error_chunk.model_dump_json()}\n\n"
+                
+        except Exception as e:
+            error_chunk = ChatStreamChunk(
+                conversation_id=request.conversation_id or "new",
+                content=f"处理请求时发生错误: {str(e)}",
+                is_final=True,
+                processing_time=time.time() - start_time
+            )
+            yield f"data: {error_chunk.model_dump_json()}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )

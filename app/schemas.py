@@ -209,4 +209,12 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(..., description="对话ID")
     message: MessageResponse = Field(..., description="助手回复")
     sources: Optional[List[Dict[str, Any]]] = Field(None, description="引用来源")
-    processing_time: float = Field(..., description="处理时间") 
+    processing_time: float = Field(..., description="处理时间")
+
+class ChatStreamChunk(BaseModel):
+    """流式对话响应块"""
+    conversation_id: str = Field(..., description="对话ID")
+    content: str = Field(..., description="内容块")
+    is_final: bool = Field(False, description="是否为最后一块")
+    sources: Optional[List[Dict[str, Any]]] = Field(None, description="引用来源，仅在最后一块包含")
+    processing_time: Optional[float] = Field(None, description="处理时间，仅在最后一块包含") 

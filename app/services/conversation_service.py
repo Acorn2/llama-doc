@@ -222,7 +222,8 @@ class ConversationManager:
         db: Session, 
         conversation_id: str, 
         user_message: str,
-        langchain_adapter=None
+        langchain_adapter=None,
+        stream: bool = False
     ) -> Dict[str, Any]:
         """
         生成助手回复
@@ -232,9 +233,10 @@ class ConversationManager:
             conversation_id: 对话ID
             user_message: 用户消息
             langchain_adapter: LangChain适配器，可选
+            stream: 是否使用流式输出
             
         Returns:
-            Dict[str, Any]: 包含生成的回复和元数据的字典
+            Dict[str, Any]: 包含生成的回复和元数据的字典，或生成器（流式模式）
         """
         start_time = time.time()
         
@@ -268,39 +270,128 @@ class ConversationManager:
                 conversation_id=conversation_id,
                 user_message=user_message,
                 context=context,
-                search_results=search_results
+                search_results=search_results,
+                stream=stream
             )
-            answer = response["answer"]
-            sources = response.get("sources", [])
+            
+            if stream and "stream" in response:
+                # 流式模式：返回生成器
+                def generate_response_stream():
+                    full_answer = ""
+                    sources = response.get("sources", [])
+                    
+                    for chunk in response["stream"]:
+                        full_answer += chunk
+                        yield {
+                            "chunk": chunk,
+                            "sources": sources,
+                            "is_final": False
+                        }
+                    
+                    # 保存完整回复到数据库
+                    processing_time = time.time() - start_time
+                    metadata = {
+                        "sources": sources,
+                        "processing_time": processing_time
+                    }
+                    message = self.add_message(db, conversation_id, "assistant", full_answer, metadata)
+                    
+                    # 发送最终块
+                    yield {
+                        "chunk": "",
+                        "sources": sources,
+                        "processing_time": processing_time,
+                        "message": message,
+                        "is_final": True
+                    }
+                
+                return {
+                    "stream": generate_response_stream(),
+                    "conversation_id": conversation_id
+                }
+            else:
+                # 非流式模式
+                answer = response["answer"]
+                sources = response.get("sources", [])
         else:
             # 否则使用默认方式生成回复
-            answer = self._generate_simple_response(
-                user_message=user_message,
-                context=context,
-                search_results=search_results
-            )
-            sources = [
-                {"content": result["content"], "score": result.get("similarity_score", 0)}
-                for result in search_results[:3]
-            ]
+            if stream:
+                # 简单流式实现：将完整回复分块发送
+                answer = self._generate_simple_response(
+                    user_message=user_message,
+                    context=context,
+                    search_results=search_results
+                )
+                sources = [
+                    {"content": result["content"], "score": result.get("similarity_score", 0)}
+                    for result in search_results[:3]
+                ]
+                
+                def generate_simple_stream():
+                    # 将答案按句子分块
+                    import re
+                    sentences = re.split(r'[。！？\n]', answer)
+                    
+                    for sentence in sentences:
+                        if sentence.strip():
+                            yield {
+                                "chunk": sentence + "。",
+                                "sources": sources,
+                                "is_final": False
+                            }
+                            time.sleep(0.1)  # 模拟流式延迟
+                    
+                    # 保存完整回复到数据库
+                    processing_time = time.time() - start_time
+                    metadata = {
+                        "sources": sources,
+                        "processing_time": processing_time
+                    }
+                    message = self.add_message(db, conversation_id, "assistant", answer, metadata)
+                    
+                    # 发送最终块
+                    yield {
+                        "chunk": "",
+                        "sources": sources,
+                        "processing_time": processing_time,
+                        "message": message,
+                        "is_final": True
+                    }
+                
+                return {
+                    "stream": generate_simple_stream(),
+                    "conversation_id": conversation_id
+                }
+            else:
+                answer = self._generate_simple_response(
+                    user_message=user_message,
+                    context=context,
+                    search_results=search_results
+                )
+                sources = [
+                    {"content": result["content"], "score": result.get("similarity_score", 0)}
+                    for result in search_results[:3]
+                ]
         
-        # 记录生成回复所需的时间
-        processing_time = time.time() - start_time
-        
-        # 创建元数据
-        metadata = {
-            "sources": sources,
-            "processing_time": processing_time
-        }
-        
-        # 保存助手回复
-        message = self.add_message(db, conversation_id, "assistant", answer, metadata)
-        
-        return {
-            "message": message,
-            "sources": sources,
-            "processing_time": processing_time
-        }
+        # 非流式模式的处理
+        if not stream:
+            # 记录生成回复所需的时间
+            processing_time = time.time() - start_time
+            
+            # 创建元数据
+            metadata = {
+                "sources": sources,
+                "processing_time": processing_time
+            }
+            
+            # 保存助手回复
+            message = self.add_message(db, conversation_id, "assistant", answer, metadata)
+            
+            return {
+                "message": message,
+                "sources": sources,
+                "processing_time": processing_time
+            }
     
     def _generate_simple_response(
         self, 

@@ -5,23 +5,20 @@ import logging
 import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import json
 
 from app.database import get_db, Conversation, Message
 from app.schemas import (
     ConversationCreate, 
     MessageCreate,
-    ChatRequest
+    ChatRequest,
+    ChatStreamChunk,
+    MessageResponse,
+    ChatResponse
 )
-# Import MessageResponse and ChatResponse directly from the .py file to avoid package-level import
-import sys
-import importlib.util
-spec = importlib.util.spec_from_file_location("schemas_py", "app/schemas.py")
-schemas_py = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(schemas_py)
-MessageResponseSchema = schemas_py.MessageResponse
-ChatResponse = schemas_py.ChatResponse
 from app.schemas.__init__ import (
     ConversationResponse,
     ConversationListResponse
@@ -253,7 +250,7 @@ async def get_conversation_messages(
         logger.error(f"获取对话消息失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取对话消息失败: {str(e)}")
 
-@router.post("/{conversation_id}/messages", response_model=MessageResponseSchema)
+@router.post("/{conversation_id}/messages", response_model=MessageResponse)
 async def add_message(
     conversation_id: str,
     request: MessageCreate,
@@ -349,7 +346,7 @@ async def chat(
                 metadata = None
         
         # Create MessageResponse object using the correct schema
-        message_response = MessageResponseSchema(
+        message_response = MessageResponse(
             id=message.id,
             conversation_id=message.conversation_id,
             role=message.role,
@@ -393,4 +390,140 @@ async def chat_in_conversation(
     )
     
     # 调用聊天接口
-    return await chat(request, db) 
+    return await chat(request, db)
+
+@router.post("/chat/stream")
+async def chat_stream(
+    request: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """流式聊天接口 - 创建或继续对话"""
+    start_time = time.time()
+    
+    try:
+        # 如果没有提供对话ID，创建新对话
+        conversation_id = request.conversation_id
+        if not conversation_id:
+            conversation = conversation_manager.create_conversation(
+                db=db,
+                kb_id=request.kb_id,
+                title=None  # 使用默认标题
+            )
+            conversation_id = conversation.id
+        
+        # 保存用户消息
+        conversation_manager.add_message(
+            db=db,
+            conversation_id=conversation_id,
+            role="user",
+            content=request.message
+        )
+        
+        # 生成流式回复
+        use_agent = getattr(request, 'use_agent', False)
+        if use_agent:
+            # 使用Agent生成流式回复
+            adapter = get_langchain_adapter()
+            response = adapter.generate_agent_response(
+                kb_id=request.kb_id,
+                user_message=request.message,
+                conversation_id=conversation_id
+            )
+            
+            # Agent模式暂时不支持流式，返回完整回复
+            def generate_agent_stream():
+                answer = response["answer"]
+                # 将完整回复分块发送
+                chunk_size = 50
+                for i in range(0, len(answer), chunk_size):
+                    chunk = answer[i:i+chunk_size]
+                    chunk_data = ChatStreamChunk(
+                        conversation_id=conversation_id,
+                        content=chunk,
+                        is_final=False
+                    )
+                    yield f"data: {chunk_data.model_dump_json()}\n\n"
+                    time.sleep(0.05)  # 模拟流式延迟
+                
+                # 发送最终块
+                final_chunk = ChatStreamChunk(
+                    conversation_id=conversation_id,
+                    content="",
+                    is_final=True,
+                    processing_time=time.time() - start_time
+                )
+                yield f"data: {final_chunk.model_dump_json()}\n\n"
+            
+            return StreamingResponse(
+                generate_agent_stream(),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+        else:
+            # 使用对话管理器生成流式回复
+            adapter = get_langchain_adapter()
+            result = conversation_manager.generate_response(
+                db=db,
+                conversation_id=conversation_id,
+                user_message=request.message,
+                langchain_adapter=adapter,
+                stream=True
+            )
+            
+            def generate_stream():
+                for chunk_data in result["stream"]:
+                    if chunk_data["is_final"]:
+                        # 最终块
+                        final_chunk = ChatStreamChunk(
+                            conversation_id=conversation_id,
+                            content="",
+                            is_final=True,
+                            sources=chunk_data.get("sources", []),
+                            processing_time=chunk_data.get("processing_time", 0)
+                        )
+                        yield f"data: {final_chunk.model_dump_json()}\n\n"
+                    else:
+                        # 内容块
+                        chunk = ChatStreamChunk(
+                            conversation_id=conversation_id,
+                            content=chunk_data["chunk"],
+                            is_final=False
+                        )
+                        yield f"data: {chunk.model_dump_json()}\n\n"
+            
+            return StreamingResponse(
+                generate_stream(),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+        
+    except ValueError as e:
+        logger.error(f"流式聊天失败: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"流式聊天失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"流式聊天失败: {str(e)}")
+
+@router.post("/{conversation_id}/chat/stream")
+async def chat_in_conversation_stream(
+    conversation_id: str,
+    message: str = Query(..., description="用户消息"),
+    use_agent: bool = Query(False, description="是否使用Agent模式"),
+    db: Session = Depends(get_db)
+):
+    """在指定对话中进行流式聊天"""
+    # 获取对话信息
+    conversation = conversation_manager.get_conversation(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    
+    # 创建聊天请求
+    request = ChatRequest(
+        conversation_id=conversation_id,
+        kb_id=conversation.kb_id,
+        message=message,
+        use_agent=use_agent
+    )
+    
+    # 调用流式聊天接口
+    return await chat_stream(request, db) 

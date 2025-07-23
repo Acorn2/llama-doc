@@ -238,7 +238,8 @@ class LangChainAdapter:
         conversation_id: str, 
         user_message: str,
         context: List[Dict[str, Any]] = None,
-        search_results: List[Dict[str, Any]] = None
+        search_results: List[Dict[str, Any]] = None,
+        stream: bool = False
     ) -> Dict[str, Any]:
         """
         生成对话回复 - 适配LCEL链，增强错误处理
@@ -249,9 +250,10 @@ class LangChainAdapter:
             user_message: 用户消息
             context: 对话上下文，可选
             search_results: 搜索结果，可选
+            stream: 是否使用流式输出
             
         Returns:
-            Dict[str, Any]: 包含回复和元数据的字典
+            Dict[str, Any]: 包含回复和元数据的字典，或生成器（流式模式）
         """
         try:
             # 先获取源文档
@@ -294,11 +296,34 @@ class LangChainAdapter:
                 # 格式化文档内容
                 context_text = "\n\n".join([doc.page_content.strip() for doc in retrieved_docs])
                 
-                # 直接使用提示模板生成回复
+                # 格式化提示
                 formatted_prompt = prompt.format(context=context_text, question=user_message)
-                answer = self.llm.invoke(formatted_prompt)
                 
-                logger.info(f"使用 {len(retrieved_docs)} 个文档生成回复")
+                if stream:
+                    # 流式输出
+                    def generate_stream():
+                        try:
+                            for chunk in self.llm.stream(formatted_prompt):
+                                if hasattr(chunk, 'content'):
+                                    yield chunk.content
+                                else:
+                                    yield str(chunk)
+                        except Exception as e:
+                            logger.error(f"流式生成失败: {e}")
+                            yield f"抱歉，生成回复时发生错误: {str(e)}"
+                    
+                    return {
+                        "stream": generate_stream(),
+                        "sources": sources
+                    }
+                else:
+                    # 非流式输出
+                    answer = self.llm.invoke(formatted_prompt)
+                    logger.info(f"使用 {len(retrieved_docs)} 个文档生成回复")
+                    return {
+                        "answer": answer,
+                        "sources": sources
+                    }
             else:
                 # 如果没有检索到文档，使用回退链
                 fallback_prompt = ChatPromptTemplate.from_template("""
@@ -310,14 +335,32 @@ class LangChainAdapter:
 """)
                 
                 formatted_prompt = fallback_prompt.format(question=user_message)
-                answer = self.llm.invoke(formatted_prompt)
                 
-                logger.info("使用回退模式生成回复")
-            
-            return {
-                "answer": answer,
-                "sources": sources
-            }
+                if stream:
+                    # 流式输出
+                    def generate_stream():
+                        try:
+                            for chunk in self.llm.stream(formatted_prompt):
+                                if hasattr(chunk, 'content'):
+                                    yield chunk.content
+                                else:
+                                    yield str(chunk)
+                        except Exception as e:
+                            logger.error(f"流式生成失败: {e}")
+                            yield f"抱歉，生成回复时发生错误: {str(e)}"
+                    
+                    return {
+                        "stream": generate_stream(),
+                        "sources": sources
+                    }
+                else:
+                    # 非流式输出
+                    answer = self.llm.invoke(formatted_prompt)
+                    logger.info("使用回退模式生成回复")
+                    return {
+                        "answer": answer,
+                        "sources": sources
+                    }
             
         except Exception as e:
             logger.error(f"生成对话回复失败: {e}")
