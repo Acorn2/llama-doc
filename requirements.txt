@@ -1,51 +1,60 @@
 # 后端框架
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
 
 # 数据库
-sqlalchemy==2.0.23
-psycopg2-binary==2.9.9  # PostgreSQL支持
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
 
-# LangChain相关 - 升级到稳定版本
-langchain==0.1.20
-langchain-community==0.0.38
-langchain-core==0.1.52
-langchain-openai==0.1.8
-langchain-experimental==0.0.62  # Agent功能支持
+# LangChain相关 - 让pip自动解决版本依赖
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langchain-experimental>=0.0.60
+langchain-text-splitters>=0.2.0
+
+# LlamaIndex相关依赖
+llama-index>=0.10.0
+llama-index-core>=0.10.0
+llama-index-readers-file>=0.1.0
+llama-index-vector-stores-qdrant>=0.2.0
+llama-index-embeddings-huggingface>=0.2.0
+llama-index-llms-openai>=0.1.0
 
 # 通义千问
-dashscope==1.14.1
+dashscope>=1.14.0
 
 # 文档处理
-PyMuPDF==1.23.8
-pypdf==4.0.1
-unstructured==0.12.4  # LangChain文档加载器支持
-python-docx==1.1.0  # Word文档处理
-docx2txt==0.8  # DOC文件处理
+PyMuPDF>=1.23.0
+pypdf>=4.0.0
+unstructured>=0.12.0
+python-docx>=1.1.0
+docx2txt>=0.8
 
 # 中文分词
-jieba==0.42.1
+jieba>=0.42.0
 
-# 工具库 - 统一使用Pydantic v2
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
-numpy==1.24.3
+# 工具库
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+numpy>=1.24.0
 
-# Token处理
-tiktoken==0.5.2
-requests==2.31.0
+# Token处理 - 移除版本限制让pip自动选择
+tiktoken
+requests>=2.31.0
 
 # 腾讯云COS SDK
-cos-python-sdk-v5==1.9.30
+cos-python-sdk-v5>=1.9.0
 
 # 开发工具
-pytest==7.4.3
-black==23.11.0 
+pytest>=7.4.0
+black>=23.11.0
 
 # 系统监控
-psutil==7.0.0
+psutil>=7.0.0
 
 # Qdrant向量数据库
-qdrant-client==1.7.1
+qdrant-client>=1.7.0

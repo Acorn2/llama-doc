@@ -87,6 +87,9 @@ fi
 echo "📦 激活虚拟环境..."
 source venv/bin/activate
 
+#退出虚拟环境
+#deactivate
+
 if [ -z "$VIRTUAL_ENV" ]; then
     echo "❌ 虚拟环境激活失败"
     exit 1
