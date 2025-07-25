@@ -7,6 +7,7 @@ from app.routers.system_routes import router as system_router
 from app.routers.knowledge_base_routes import router as knowledge_base_router
 from app.routers.conversation_routes import router as conversation_router
 from app.routers.agent_router import router as agent_router
+from app.routers.user_routes import router as user_router
 
 __all__ = [
     "document_router",
@@ -14,5 +15,6 @@ __all__ = [
     "system_router",
     "knowledge_base_router",
     "conversation_router",
-    "agent_router"
+    "agent_router",
+    "user_router"
 ] 

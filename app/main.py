@@ -17,7 +17,7 @@ import signal
 from app.database import create_tables
 from app.logging_config import setup_logging, RequestLoggingMiddleware
 from app.services.document_service import document_task_processor
-from app.routers import document_router, query_router, system_router, knowledge_base_router, conversation_router
+from app.routers import document_router, query_router, system_router, knowledge_base_router, conversation_router, user_router
 
 # 新架构模块
 from app.config.settings import get_settings
@@ -157,6 +157,7 @@ app.add_middleware(RequestLoggingMiddleware)
 register_exception_handlers(app)
 
 # 注册路由 - 原有路由
+app.include_router(user_router, prefix="/api/v1", tags=["用户管理"])
 app.include_router(document_router, prefix="/api/v1", tags=["文档管理"])
 app.include_router(query_router, prefix="/api/v1", tags=["文档查询"])
 app.include_router(system_router, prefix="/api/v1", tags=["系统信息"])

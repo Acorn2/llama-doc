@@ -22,6 +22,81 @@ from .agent_schemas import (
     AgentStatusResponse
 )
 
+# 用户相关模型定义
+from pydantic import validator
+
+class UserBase(BaseModel):
+    """用户基础模型"""
+    username: Optional[str] = Field(None, description="用户名")
+    email: Optional[str] = Field(None, description="邮箱地址")
+    phone: Optional[str] = Field(None, description="手机号")
+    full_name: Optional[str] = Field(None, description="全名")
+    avatar_url: Optional[str] = Field(None, description="头像URL")
+    
+    @validator('email')
+    def validate_email(cls, v):
+        if v and '@' not in v:
+            raise ValueError('邮箱格式不正确')
+        return v
+    
+    @validator('phone')
+    def validate_phone(cls, v):
+        if v and (len(v) < 11 or not v.isdigit()):
+            raise ValueError('手机号格式不正确')
+        return v
+
+class UserCreate(UserBase):
+    """用户创建模型"""
+    password: str = Field(..., min_length=6, description="密码，至少6位")
+    
+    @validator('password')
+    def validate_password(cls, v):
+        if len(v) < 6:
+            raise ValueError('密码长度至少为6位')
+        return v
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # 确保至少提供邮箱或手机号之一
+        if not self.email and not self.phone:
+            raise ValueError('必须提供邮箱或手机号之一')
+
+class UserUpdate(UserBase):
+    """用户更新模型"""
+    password: Optional[str] = Field(None, min_length=6, description="新密码")
+    is_active: Optional[bool] = Field(None, description="是否激活")
+
+class UserLogin(BaseModel):
+    """用户登录模型"""
+    login_credential: str = Field(..., description="登录凭据（邮箱或手机号）")
+    password: str = Field(..., description="密码")
+
+class UserResponse(UserBase):
+    """用户响应模型"""
+    id: str = Field(..., description="用户ID")
+    is_active: bool = Field(..., description="是否激活")
+    is_superuser: bool = Field(..., description="是否超级用户")
+    create_time: datetime = Field(..., description="创建时间")
+    update_time: Optional[datetime] = Field(None, description="更新时间")
+    last_login_time: Optional[datetime] = Field(None, description="最后登录时间")
+    
+    class Config:
+        from_attributes = True
+
+class UserListResponse(BaseModel):
+    """用户列表响应模型"""
+    success: bool = Field(..., description="是否成功")
+    message: str = Field(..., description="响应消息")
+    users: List[UserResponse] = Field(..., description="用户列表")
+    total: int = Field(..., description="总数")
+
+class TokenResponse(BaseModel):
+    """令牌响应模型"""
+    access_token: str = Field(..., description="访问令牌")
+    token_type: str = Field("bearer", description="令牌类型")
+    expires_in: int = Field(..., description="过期时间（秒）")
+    user: UserResponse = Field(..., description="用户信息")
+
 # 流式对话相关模型
 class ChatStreamChunk(BaseModel):
     """流式对话响应块"""
@@ -354,6 +429,14 @@ class ValidationErrorResponse(BaseModel):
     timestamp: datetime
 
 __all__ = [
+    # 用户相关模式
+    "UserBase",
+    "UserCreate",
+    "UserUpdate",
+    "UserLogin",
+    "UserResponse",
+    "UserListResponse",
+    "TokenResponse",
     # 新架构的Agent模式
     "AgentChatRequest",
     "AgentChatResponse", 

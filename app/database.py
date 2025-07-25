@@ -1,6 +1,6 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, text, Index, inspect, ForeignKey
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, text, Index, inspect, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.pool import QueuePool, StaticPool
 import os
@@ -90,11 +90,48 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # 创建基类
 Base = declarative_base()
 
+class User(Base):
+    """用户数据模型"""
+    __tablename__ = "users"
+    
+    id = Column(String, primary_key=True, index=True)
+    username = Column(String, nullable=True, index=True)  # 用户名，可选
+    email = Column(String, nullable=True, unique=True, index=True)  # 邮箱，唯一
+    phone = Column(String, nullable=True, unique=True, index=True)  # 手机号，唯一
+    password_hash = Column(String, nullable=False)  # 密码哈希
+    full_name = Column(String, nullable=True)  # 全名
+    avatar_url = Column(String, nullable=True)  # 头像URL
+    is_active = Column(Boolean, default=True)  # 是否激活
+    is_superuser = Column(Boolean, default=False)  # 是否超级用户
+    
+    # 时间字段
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    update_time = Column(DateTime(timezone=True), onupdate=func.now())
+    last_login_time = Column(DateTime(timezone=True), nullable=True)
+    
+    # 用户设置
+    preferences = Column(Text, nullable=True)  # JSON格式的用户偏好设置
+    
+    # 建立关系
+    knowledge_bases = relationship("KnowledgeBase", back_populates="user")
+    documents = relationship("Document", back_populates="user")
+    conversations = relationship("Conversation", back_populates="user")
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_user_email', 'email'),
+            Index('idx_user_phone', 'phone'),
+            Index('idx_user_active', 'is_active'),
+            Index('idx_user_create_time', 'create_time'),
+        )
+
 class Document(Base):
     """文档数据模型"""
     __tablename__ = "documents"
     
     id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)  # 关联用户
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)  # 本地路径（向后兼容）
     file_size = Column(Integer, nullable=False)
@@ -121,6 +158,9 @@ class Document(Base):
     max_retries = Column(Integer, default=3)
     last_retry_time = Column(DateTime(timezone=True), nullable=True)
     
+    # 建立关系
+    user = relationship("User", back_populates="documents")
+    
     # 根据数据库类型添加索引
     if DB_TYPE == "postgresql":
         __table_args__ = (
@@ -130,6 +170,7 @@ class Document(Base):
             Index('idx_cos_object_key', 'cos_object_key'),  # 新增COS对象键索引
             Index('idx_storage_type', 'storage_type'),      # 新增存储类型索引
             Index('idx_file_type', 'file_type'),           # 新增文件类型索引
+            Index('idx_user_upload_time', 'user_id', 'upload_time'),  # 用户文档索引
         )
     # SQLite 的索引会在数据库创建时自动处理
 
@@ -138,6 +179,7 @@ class QueryHistory(Base):
     __tablename__ = "query_history"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)  # 关联用户
     document_id = Column(String, nullable=False, index=True)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
@@ -150,6 +192,7 @@ class KnowledgeBase(Base):
     __tablename__ = "knowledge_bases"
     
     id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)  # 关联用户
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     create_time = Column(DateTime(timezone=True), server_default=func.now())
@@ -158,11 +201,16 @@ class KnowledgeBase(Base):
     document_count = Column(Integer, default=0)         # 包含的文档数量
     status = Column(String, default="active")           # active, archived, deleted
     
+    # 建立关系
+    user = relationship("User", back_populates="knowledge_bases")
+    conversations = relationship("Conversation", back_populates="knowledge_base")
+    
     # 根据数据库类型添加索引
     if DB_TYPE == "postgresql":
         __table_args__ = (
             Index('idx_kb_status', 'status'),
             Index('idx_kb_create_time', 'create_time'),
+            Index('idx_kb_user', 'user_id', 'status'),  # 用户知识库索引
         )
 
 class KnowledgeBaseDocument(Base):
@@ -185,11 +233,17 @@ class Conversation(Base):
     __tablename__ = "conversations"
     
     id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)  # 关联用户
     kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
     title = Column(String, nullable=True)
     create_time = Column(DateTime(timezone=True), server_default=func.now())
     update_time = Column(DateTime(timezone=True), onupdate=func.now())
     status = Column(String, default="active")  # active, archived, deleted
+    
+    # 建立关系
+    user = relationship("User", back_populates="conversations")
+    knowledge_base = relationship("KnowledgeBase", back_populates="conversations")
+    messages = relationship("Message", back_populates="conversation")
     
     # 根据数据库类型添加索引
     if DB_TYPE == "postgresql":
@@ -197,6 +251,7 @@ class Conversation(Base):
             Index('idx_conv_kb_id', 'kb_id'),
             Index('idx_conv_status', 'status'),
             Index('idx_conv_create_time', 'create_time'),
+            Index('idx_conv_user', 'user_id', 'status'),  # 用户对话索引
         )
 
 class Message(Base):
@@ -210,6 +265,9 @@ class Message(Base):
     sequence_number = Column(Integer, nullable=False, default=0)  # 消息在对话中的序号
     create_time = Column(DateTime(timezone=True), server_default=func.now())
     message_metadata = Column(Text, nullable=True)  # JSON格式的元数据，包括使用的工具、引用等
+    
+    # 建立关系
+    conversation = relationship("Conversation", back_populates="messages")
     
     # 根据数据库类型添加索引
     if DB_TYPE == "postgresql":
@@ -281,8 +339,8 @@ def check_tables_exist():
     try:
         inspector = inspect(engine)
         
-        # 检查核心表是否存在
-        required_tables = ["documents", "query_history", "knowledge_bases", "kb_documents", "conversations", "messages"]
+        # 检查核心表是否存在，增加用户表
+        required_tables = ["users", "documents", "query_history", "knowledge_bases", "kb_documents", "conversations", "messages"]
         existing_tables = [table for table in required_tables if inspector.has_table(table)]
         
         # 如果所有必需的表都存在，则返回True
