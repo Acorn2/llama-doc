@@ -2,20 +2,23 @@
 知识库相关的API路由
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
-from app.database import get_db, KnowledgeBase, Document
+from app.database import get_db, KnowledgeBase, Document, User
 from app.schemas import (
     KnowledgeBaseCreate, 
+    KnowledgeBaseUpdate,
+    KnowledgeBaseResponse,
+    KnowledgeBaseListResponse,
+    PublicKnowledgeBaseListRequest,
+    KnowledgeBaseLikeResponse,
+    KnowledgeBaseAccessLogRequest,
     DocumentAddResponse
 )
-from app.schemas.__init__ import (
-    KnowledgeBaseResponse,
-    KnowledgeBaseListResponse
-)
 from app.services.knowledge_base_service import KnowledgeBaseManager
+from app.core.dependencies import get_current_user, get_optional_current_user
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -30,266 +33,225 @@ router = APIRouter(
 # 创建知识库管理器实例
 kb_manager = KnowledgeBaseManager()
 
-@router.post("/", response_model=KnowledgeBaseResponse)
+@router.post("/", response_model=KnowledgeBaseResponse, status_code=status.HTTP_201_CREATED)
 async def create_knowledge_base(
     request: KnowledgeBaseCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """创建知识库"""
     try:
         kb = kb_manager.create_knowledge_base(
             db=db,
-            name=request.name,
-            description=request.description
+            kb_data=request,
+            user_id=current_user.id
         )
         
-        # 转换为响应模型
-        from app.schemas.__init__ import KnowledgeBaseInfo
-        
-        kb_info = KnowledgeBaseInfo(
-            id=kb.id,
-            name=kb.name,
-            description=kb.description,
-            document_count=getattr(kb, 'document_count', 0),
-            created_at=kb.create_time,
-            updated_at=kb.update_time or kb.create_time,
-            embedding_model=getattr(kb, 'embedding_model', None)
-        )
+        # 解析标签
+        tags = []
+        if kb.tags:
+            import json
+            try:
+                tags = json.loads(kb.tags)
+            except json.JSONDecodeError:
+                tags = []
         
         return KnowledgeBaseResponse(
-            success=True,
-            message="知识库创建成功",
-            knowledge_base=kb_info
+            id=kb.id,
+            user_id=kb.user_id,
+            name=kb.name,
+            description=kb.description,
+            create_time=kb.create_time,
+            update_time=kb.update_time,
+            document_count=kb.document_count,
+            status=kb.status,
+            is_public=kb.is_public,
+            public_description=kb.public_description,
+            tags=tags,
+            view_count=kb.view_count,
+            like_count=kb.like_count,
+            is_owner=True
         )
     except Exception as e:
         logger.error(f"创建知识库失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"创建知识库失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @router.get("/", response_model=KnowledgeBaseListResponse)
 async def list_knowledge_bases(
-    skip: int = 0,
-    limit: int = 10,
-    status: Optional[str] = "active",
+    include_public: bool = Query(True, description="是否包含公开知识库"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """列出所有知识库"""
+    """获取用户可访问的知识库列表"""
     try:
-        result = kb_manager.list_knowledge_bases(
+        knowledge_bases = kb_manager.get_accessible_knowledge_bases(
             db=db,
-            skip=skip,
-            limit=limit,
-            status=status
+            user_id=current_user.id,
+            include_public=include_public
         )
         
-        # 转换为响应模型
-        from app.schemas.__init__ import KnowledgeBaseInfo, KnowledgeBaseList
-        
-        kb_infos = []
-        for kb in result["items"]:
-            kb_info = KnowledgeBaseInfo(
+        kb_responses = []
+        for kb in knowledge_bases:
+            # 解析标签
+            tags = []
+            if kb.tags:
+                import json
+                try:
+                    tags = json.loads(kb.tags)
+                except json.JSONDecodeError:
+                    tags = []
+            
+            kb_responses.append(KnowledgeBaseResponse(
                 id=kb.id,
+                user_id=kb.user_id,
                 name=kb.name,
                 description=kb.description,
-                document_count=getattr(kb, 'document_count', 0),
-                created_at=kb.create_time,
-                updated_at=kb.update_time or kb.create_time,
-                embedding_model=getattr(kb, 'embedding_model', None)
-            )
-            kb_infos.append(kb_info)
-        
-        kb_list = KnowledgeBaseList(
-            knowledge_bases=kb_infos,
-            total=result["total"]
-        )
+                create_time=kb.create_time,
+                update_time=kb.update_time,
+                document_count=kb.document_count,
+                status=kb.status,
+                is_public=kb.is_public,
+                public_description=kb.public_description,
+                tags=tags,
+                view_count=kb.view_count,
+                like_count=kb.like_count,
+                is_owner=kb.user_id == current_user.id
+            ))
         
         return KnowledgeBaseListResponse(
-            success=True,
-            data=kb_list,
-            message="获取知识库列表成功"
+            items=kb_responses,
+            total=len(kb_responses)
         )
     except Exception as e:
         logger.error(f"获取知识库列表失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取知识库列表失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取知识库列表失败")
 
-@router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
-async def get_knowledge_base(
-    kb_id: str,
+@router.get("/public")
+async def list_public_knowledge_bases(
+    search: Optional[str] = Query(None, description="搜索关键词"),
+    tags: Optional[List[str]] = Query(None, description="标签过滤"),
+    sort_by: str = Query("create_time", description="排序字段"),
+    sort_order: str = Query("desc", description="排序顺序"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=50, description="每页数量"),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取知识库详情"""
-    kb = kb_manager.get_knowledge_base(db, kb_id)
-    if not kb:
-        raise HTTPException(status_code=404, detail="知识库不存在")
-    
-    # 转换为响应模型
-    from app.schemas.__init__ import KnowledgeBaseInfo
-    
-    kb_info = KnowledgeBaseInfo(
-        id=kb.id,
-        name=kb.name,
-        description=kb.description,
-        document_count=getattr(kb, 'document_count', 0),
-        created_at=kb.create_time,
-        updated_at=kb.update_time or kb.create_time,
-        embedding_model=getattr(kb, 'embedding_model', None)
-    )
-    
-    return KnowledgeBaseResponse(
-        success=True,
-        message="获取知识库详情成功",
-        knowledge_base=kb_info
-    )
+    """获取公开知识库列表"""
+    try:
+        request = PublicKnowledgeBaseListRequest(
+            search=search,
+            tags=tags,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size
+        )
+        
+        result = kb_manager.get_public_knowledge_bases(
+            db=db,
+            request=request,
+            current_user_id=current_user.id if current_user else None
+        )
+        
+        return {
+            "success": True,
+            "message": "获取公开知识库列表成功",
+            "data": result
+        }
+    except Exception as e:
+        logger.error(f"获取公开知识库列表失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取公开知识库列表失败")
 
 @router.put("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def update_knowledge_base(
     kb_id: str,
-    request: KnowledgeBaseCreate,
+    request: KnowledgeBaseUpdate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """更新知识库"""
-    kb = kb_manager.update_knowledge_base(
-        db=db,
-        kb_id=kb_id,
-        name=request.name,
-        description=request.description
-    )
-    
-    if not kb:
-        raise HTTPException(status_code=404, detail="知识库不存在")
-    
-    # 转换为响应模型
-    from app.schemas.__init__ import KnowledgeBaseInfo
-    
-    kb_info = KnowledgeBaseInfo(
-        id=kb.id,
-        name=kb.name,
-        description=kb.description,
-        document_count=getattr(kb, 'document_count', 0),
-        created_at=kb.create_time,
-        updated_at=kb.update_time or kb.create_time,
-        embedding_model=getattr(kb, 'embedding_model', None)
-    )
-    
-    return KnowledgeBaseResponse(
-        success=True,
-        message="知识库更新成功",
-        knowledge_base=kb_info
-    )
-
-@router.delete("/{kb_id}")
-async def delete_knowledge_base(
-    kb_id: str,
-    db: Session = Depends(get_db)
-):
-    """删除知识库（逻辑删除）"""
-    success = kb_manager.delete_knowledge_base(db, kb_id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="知识库不存在")
-    
-    return {"success": True, "message": "知识库已删除"}
-
-@router.post("/{kb_id}/documents/{document_id}", response_model=DocumentAddResponse)
-async def add_document_to_kb(
-    kb_id: str,
-    document_id: str,
-    db: Session = Depends(get_db)
-):
-    """添加文档到知识库"""
+    """更新知识库信息"""
     try:
-        kb_doc = kb_manager.add_document_to_kb(db, kb_id, document_id)
-        
-        # 如果返回None，说明文档已在知识库中
-        if kb_doc is None:
-            return DocumentAddResponse(
-                success=True,
-                message="文档已在知识库中",
-                kb_id=kb_id,
-                document_id=document_id
-            )
-        
-        return DocumentAddResponse(
-            success=True,
-            message="文档成功添加到知识库",
+        kb = kb_manager.update_knowledge_base(
+            db=db,
             kb_id=kb_id,
-            document_id=document_id
-        )
-    except ValueError as e:
-        logger.error(f"添加文档到知识库失败: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"添加文档到知识库失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"添加文档到知识库失败: {str(e)}")
-
-@router.delete("/{kb_id}/documents/{document_id}")
-async def remove_document_from_kb(
-    kb_id: str,
-    document_id: str,
-    db: Session = Depends(get_db)
-):
-    """从知识库移除文档"""
-    try:
-        success = kb_manager.remove_document_from_kb(db, kb_id, document_id)
-        
-        if not success:
-            return {"success": False, "message": "文档不在知识库中"}
-        
-        return {"success": True, "message": "文档已从知识库移除"}
-    except ValueError as e:
-        logger.error(f"从知识库移除文档失败: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"从知识库移除文档失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"从知识库移除文档失败: {str(e)}")
-
-@router.get("/{kb_id}/documents")
-async def list_kb_documents(
-    kb_id: str,
-    db: Session = Depends(get_db)
-):
-    """列出知识库中的所有文档"""
-    try:
-        documents = kb_manager.list_kb_documents(db, kb_id)
-        
-        # 格式化输出
-        result = []
-        for doc in documents:
-            result.append({
-                "id": doc.id,
-                "filename": doc.filename,
-                "pages": doc.pages,
-                "upload_time": doc.upload_time,
-                "status": doc.status
-            })
-        
-        return {"items": result, "total": len(result)}
-    except ValueError as e:
-        logger.error(f"获取知识库文档列表失败: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"获取知识库文档列表失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取知识库文档列表失败: {str(e)}")
-
-@router.post("/{kb_id}/search")
-async def search_knowledge_base(
-    kb_id: str,
-    query: str = Query(..., description="搜索查询"),
-    top_k: int = Query(5, description="返回结果数量"),
-    db: Session = Depends(get_db)
-):
-    """搜索知识库内容"""
-    try:
-        results = kb_manager.search_knowledge_base(
-            kb_id=kb_id,
-            query=query,
-            top_k=top_k,
-            db=db
+            user_id=current_user.id,
+            update_data=request
         )
         
-        return {"results": results, "total": len(results)}
-    except ValueError as e:
-        logger.error(f"搜索知识库失败: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        if not kb:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权限访问")
+        
+        # 解析标签
+        tags = []
+        if kb.tags:
+            import json
+            try:
+                tags = json.loads(kb.tags)
+            except json.JSONDecodeError:
+                tags = []
+        
+        return KnowledgeBaseResponse(
+            id=kb.id,
+            user_id=kb.user_id,
+            name=kb.name,
+            description=kb.description,
+            create_time=kb.create_time,
+            update_time=kb.update_time,
+            document_count=kb.document_count,
+            status=kb.status,
+            is_public=kb.is_public,
+            public_description=kb.public_description,
+            tags=tags,
+            view_count=kb.view_count,
+            like_count=kb.like_count,
+            is_owner=True
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"搜索知识库失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"搜索知识库失败: {str(e)}") 
+        logger.error(f"更新知识库失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.post("/{kb_id}/like", response_model=KnowledgeBaseLikeResponse)
+async def toggle_knowledge_base_like(
+    kb_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """切换知识库点赞状态"""
+    try:
+        result = kb_manager.toggle_knowledge_base_like(
+            db=db,
+            kb_id=kb_id,
+            user_id=current_user.id
+        )
+        
+        return KnowledgeBaseLikeResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"切换点赞状态失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="操作失败")
+
+@router.post("/{kb_id}/access")
+async def log_knowledge_base_access(
+    kb_id: str,
+    request: KnowledgeBaseAccessLogRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """记录知识库访问"""
+    try:
+        kb_manager.record_knowledge_base_access(
+            db=db,
+            kb_id=kb_id,
+            user_id=current_user.id,
+            access_type=request.access_type,
+            metadata=request.access_metadata
+        )
+        
+        return {"success": True, "message": "访问记录成功"}
+    except Exception as e:
+        logger.error(f"记录访问失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="记录访问失败") 

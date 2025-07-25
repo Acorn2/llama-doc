@@ -294,15 +294,70 @@ class VectorStoreStatus(BaseModel):
     total_vectors: Optional[int] = None
     last_check: datetime
 
-# 知识库相关模型（兼容性）
+# 知识库相关模式
 class KnowledgeBaseCreate(BaseModel):
-    """知识库创建请求"""
-    name: str
-    description: Optional[str] = None
-    embedding_model: Optional[str] = None
+    """创建知识库请求模型"""
+    name: str = Field(..., description="知识库名称")
+    description: Optional[str] = Field(None, description="知识库描述")
+    user_id: Optional[str] = Field(None, description="用户ID，可选（从认证token获取）")
+    is_public: bool = Field(False, description="是否公开")
+    public_description: Optional[str] = Field(None, description="公开描述")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
 
+class KnowledgeBaseUpdate(BaseModel):
+    """更新知识库请求模型"""
+    name: Optional[str] = Field(None, description="知识库名称")
+    description: Optional[str] = Field(None, description="知识库描述")
+    is_public: Optional[bool] = Field(None, description="是否公开")
+    public_description: Optional[str] = Field(None, description="公开描述")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
+
+class KnowledgeBaseResponse(BaseModel):
+    """知识库响应模型"""
+    id: str = Field(..., description="知识库ID")
+    user_id: str = Field(..., description="用户ID")
+    name: str = Field(..., description="知识库名称")
+    description: Optional[str] = Field(None, description="知识库描述")
+    create_time: datetime = Field(..., description="创建时间")
+    update_time: Optional[datetime] = Field(None, description="更新时间")
+    document_count: int = Field(0, description="文档数量")
+    status: str = Field(..., description="知识库状态")
+    is_public: bool = Field(..., description="是否公开")
+    public_description: Optional[str] = Field(None, description="公开描述")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
+    view_count: int = Field(0, description="浏览次数")
+    like_count: int = Field(0, description="点赞次数")
+    
+    # 扩展字段（仅在特定接口返回）
+    owner_name: Optional[str] = Field(None, description="创建者名称")
+    is_liked: Optional[bool] = Field(None, description="当前用户是否已点赞")
+    is_owner: Optional[bool] = Field(None, description="当前用户是否为创建者")
+
+class PublicKnowledgeBaseListRequest(BaseModel):
+    """公开知识库列表请求模型"""
+    search: Optional[str] = Field(None, description="搜索关键词")
+    tags: Optional[List[str]] = Field(None, description="标签过滤")
+    sort_by: str = Field("create_time", description="排序字段：create_time, view_count, like_count")
+    sort_order: str = Field("desc", description="排序顺序：asc, desc")
+    page: int = Field(1, ge=1, description="页码")
+    page_size: int = Field(10, ge=1, le=50, description="每页数量")
+
+class KnowledgeBaseLikeResponse(BaseModel):
+    """知识库点赞响应模型"""
+    success: bool = Field(..., description="操作是否成功")
+    message: str = Field(..., description="响应消息")
+    is_liked: bool = Field(..., description="当前点赞状态")
+    like_count: int = Field(..., description="总点赞数")
+
+class KnowledgeBaseAccessLogRequest(BaseModel):
+    """知识库访问记录请求模型"""
+    kb_id: str = Field(..., description="知识库ID")
+    access_type: str = Field(..., description="访问类型：view, chat")
+    access_metadata: Optional[Dict[str, Any]] = Field(None, description="额外信息")
+
+# 兼容性模型定义
 class KnowledgeBaseInfo(BaseModel):
-    """知识库信息"""
+    """知识库信息（兼容性）"""
     id: str
     name: str
     description: Optional[str] = None
@@ -321,18 +376,10 @@ class KnowledgeBaseDelete(BaseModel):
     success: bool
     message: str
 
-class KnowledgeBaseResponse(BaseModel):
-    """知识库通用响应"""
-    success: bool
-    message: str
-    data: Optional[Dict[str, Any]] = None
-    knowledge_base: Optional[KnowledgeBaseInfo] = None
-
 class KnowledgeBaseListResponse(BaseModel):
     """知识库列表响应"""
-    success: bool
-    data: KnowledgeBaseList
-    message: Optional[str] = None
+    items: List[KnowledgeBaseResponse]
+    total: int
 
 # 对话相关模型（兼容性）
 class ConversationCreate(BaseModel):
@@ -361,14 +408,14 @@ class ConversationMessage(BaseModel):
     role: str  # "user" or "assistant"
     content: str
     timestamp: datetime
-    metadata: Optional[Dict[str, Any]] = None
+    message_metadata: Optional[Dict[str, Any]] = None
 
 class MessageCreate(BaseModel):
     """消息创建请求"""
     conversation_id: str
     content: str
     role: str = "user"
-    metadata: Optional[Dict[str, Any]] = None
+    message_metadata: Optional[Dict[str, Any]] = None
 
 class ConversationHistory(BaseModel):
     """对话历史"""
@@ -479,10 +526,14 @@ __all__ = [
     "VectorStoreStatus",
     # 知识库相关模式（兼容性）
     "KnowledgeBaseCreate",
+    "KnowledgeBaseUpdate",
+    "KnowledgeBaseResponse",
+    "PublicKnowledgeBaseListRequest",
+    "KnowledgeBaseLikeResponse",
+    "KnowledgeBaseAccessLogRequest",
     "KnowledgeBaseInfo",
     "KnowledgeBaseList",
     "KnowledgeBaseDelete",
-    "KnowledgeBaseResponse",
     "KnowledgeBaseListResponse",
     # 对话相关模式（兼容性）
     "ConversationCreate",

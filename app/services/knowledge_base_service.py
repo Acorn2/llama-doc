@@ -1,9 +1,12 @@
 import uuid
+import json
 import logging
 from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
-from app.database import KnowledgeBase, KnowledgeBaseDocument, Document
+from sqlalchemy import or_, and_, func, desc
+from app.database import KnowledgeBase, KnowledgeBaseDocument, Document, User, KnowledgeBaseLike, KnowledgeBaseAccess
 from app.core.vector_store import VectorStoreManager
+from app.schemas import KnowledgeBaseCreate, KnowledgeBaseUpdate, KnowledgeBaseResponse, PublicKnowledgeBaseListRequest
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +16,19 @@ class KnowledgeBaseManager:
     def __init__(self, vector_store_manager=None):
         self.vector_store_manager = vector_store_manager or VectorStoreManager()
     
-    def create_knowledge_base(self, db: Session, name: str, description: Optional[str] = None) -> KnowledgeBase:
+    def create_knowledge_base(
+        self, 
+        db: Session, 
+        kb_data: KnowledgeBaseCreate, 
+        user_id: str
+    ) -> KnowledgeBase:
         """
         创建知识库
         
         Args:
             db: 数据库会话
-            name: 知识库名称
-            description: 知识库描述
+            kb_data: 知识库创建数据
+            user_id: 用户ID
             
         Returns:
             KnowledgeBase: 创建的知识库对象
@@ -30,6 +38,11 @@ class KnowledgeBaseManager:
         
         # 创建向量存储集合
         vector_store_name = f"kb_{kb_id}"
+        
+        # 处理标签
+        tags_json = None
+        if kb_data.tags:
+            tags_json = json.dumps(kb_data.tags, ensure_ascii=False)
         
         # 直接创建知识库集合，而不是使用create_document_collection方法
         try:
@@ -52,8 +65,12 @@ class KnowledgeBaseManager:
         # 创建知识库记录
         kb = KnowledgeBase(
             id=kb_id,
-            name=name,
-            description=description,
+            user_id=user_id,
+            name=kb_data.name,
+            description=kb_data.description,
+            is_public=kb_data.is_public,
+            public_description=kb_data.public_description,
+            tags=tags_json,
             vector_store_name=vector_store_name,
             document_count=0,
             status="active"
@@ -442,6 +459,290 @@ class KnowledgeBaseManager:
         
         logger.info(f"成功删除知识库: {kb_id}")
         return True
+    
+    def get_accessible_knowledge_bases(
+        self, 
+        db: Session, 
+        user_id: str, 
+        include_public: bool = True
+    ) -> List[KnowledgeBase]:
+        """
+        获取用户可访问的知识库
+        
+        Args:
+            db: 数据库会话
+            user_id: 用户ID
+            include_public: 是否包含公开知识库
+            
+        Returns:
+            List[KnowledgeBase]: 可访问的知识库列表
+        """
+        query = db.query(KnowledgeBase).filter(KnowledgeBase.status == "active")
+        
+        if include_public:
+            # 用户自己的知识库 或 公开的知识库
+            query = query.filter(
+                or_(
+                    KnowledgeBase.user_id == user_id,
+                    KnowledgeBase.is_public == True
+                )
+            )
+        else:
+            # 只包含用户自己的知识库
+            query = query.filter(KnowledgeBase.user_id == user_id)
+        
+        return query.order_by(desc(KnowledgeBase.create_time)).all()
+    
+    def get_public_knowledge_bases(
+        self, 
+        db: Session, 
+        request: PublicKnowledgeBaseListRequest,
+        current_user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        获取公开知识库列表
+        
+        Args:
+            db: 数据库会话
+            request: 请求参数
+            current_user_id: 当前用户ID（用于判断点赞状态）
+            
+        Returns:
+            Dict[str, Any]: 包含知识库列表和分页信息的字典
+        """
+        # 基础查询：只查询公开的、状态为active的知识库
+        query = db.query(KnowledgeBase).filter(
+            KnowledgeBase.is_public == True,
+            KnowledgeBase.status == "active"
+        )
+        
+        # 搜索过滤
+        if request.search:
+            search_pattern = f"%{request.search}%"
+            query = query.filter(
+                or_(
+                    KnowledgeBase.name.like(search_pattern),
+                    KnowledgeBase.public_description.like(search_pattern),
+                    KnowledgeBase.tags.like(search_pattern)
+                )
+            )
+        
+        # 标签过滤
+        if request.tags:
+            for tag in request.tags:
+                query = query.filter(KnowledgeBase.tags.like(f'%"{tag}"%'))
+        
+        # 排序
+        if request.sort_by == "view_count":
+            order_field = KnowledgeBase.view_count
+        elif request.sort_by == "like_count":
+            order_field = KnowledgeBase.like_count
+        else:
+            order_field = KnowledgeBase.create_time
+        
+        if request.sort_order == "asc":
+            query = query.order_by(order_field)
+        else:
+            query = query.order_by(desc(order_field))
+        
+        # 计算总数
+        total = query.count()
+        
+        # 分页
+        offset = (request.page - 1) * request.page_size
+        knowledge_bases = query.offset(offset).limit(request.page_size).all()
+        
+        # 获取创建者信息和点赞状态
+        kb_responses = []
+        for kb in knowledge_bases:
+            # 获取创建者信息
+            owner = db.query(User).filter(User.id == kb.user_id).first()
+            
+            # 检查当前用户是否点赞
+            is_liked = False
+            if current_user_id:
+                like_record = db.query(KnowledgeBaseLike).filter(
+                    KnowledgeBaseLike.kb_id == kb.id,
+                    KnowledgeBaseLike.user_id == current_user_id
+                ).first()
+                is_liked = like_record is not None
+            
+            # 解析标签
+            tags = []
+            if kb.tags:
+                try:
+                    tags = json.loads(kb.tags)
+                except json.JSONDecodeError:
+                    tags = []
+            
+            kb_responses.append({
+                "id": kb.id,
+                "user_id": kb.user_id,
+                "name": kb.name,
+                "description": kb.description,
+                "public_description": kb.public_description,
+                "create_time": kb.create_time,
+                "update_time": kb.update_time,
+                "document_count": kb.document_count,
+                "status": kb.status,
+                "is_public": kb.is_public,
+                "tags": tags,
+                "view_count": kb.view_count,
+                "like_count": kb.like_count,
+                "owner_name": owner.full_name or owner.username if owner else "未知用户",
+                "is_liked": is_liked,
+                "is_owner": current_user_id == kb.user_id if current_user_id else False
+            })
+        
+        return {
+            "items": kb_responses,
+            "total": total,
+            "page": request.page,
+            "page_size": request.page_size,
+            "pages": (total + request.page_size - 1) // request.page_size
+        }
+    
+    def toggle_knowledge_base_like(
+        self, 
+        db: Session, 
+        kb_id: str, 
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        切换知识库点赞状态
+        
+        Args:
+            db: 数据库会话
+            kb_id: 知识库ID
+            user_id: 用户ID
+            
+        Returns:
+            Dict[str, Any]: 包含操作结果的字典
+        """
+        # 检查知识库是否存在且公开
+        kb = db.query(KnowledgeBase).filter(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.is_public == True,
+            KnowledgeBase.status == "active"
+        ).first()
+        
+        if not kb:
+            raise ValueError("知识库不存在或不公开")
+        
+        # 检查是否已点赞
+        existing_like = db.query(KnowledgeBaseLike).filter(
+            KnowledgeBaseLike.kb_id == kb_id,
+            KnowledgeBaseLike.user_id == user_id
+        ).first()
+        
+        if existing_like:
+            # 取消点赞
+            db.delete(existing_like)
+            kb.like_count = max(0, kb.like_count - 1)
+            is_liked = False
+            message = "已取消点赞"
+        else:
+            # 添加点赞
+            like_record = KnowledgeBaseLike(
+                id=str(uuid.uuid4()),
+                kb_id=kb_id,
+                user_id=user_id
+            )
+            db.add(like_record)
+            kb.like_count += 1
+            is_liked = True
+            message = "点赞成功"
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": message,
+            "is_liked": is_liked,
+            "like_count": kb.like_count
+        }
+    
+    def record_knowledge_base_access(
+        self, 
+        db: Session, 
+        kb_id: str, 
+        user_id: str, 
+        access_type: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        记录知识库访问
+        
+        Args:
+            db: 数据库会话
+            kb_id: 知识库ID
+            user_id: 用户ID
+            access_type: 访问类型（view, chat）
+            metadata: 额外信息
+        """
+        # 如果是查看操作，增加浏览次数
+        if access_type == "view":
+            kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+            if kb:
+                kb.view_count += 1
+        
+        # 记录访问日志
+        access_record = KnowledgeBaseAccess(
+            id=str(uuid.uuid4()),
+            kb_id=kb_id,
+            user_id=user_id,
+            access_type=access_type,
+            access_metadata=json.dumps(metadata) if metadata else None
+        )
+        db.add(access_record)
+        db.commit()
+    
+    def update_knowledge_base(
+        self, 
+        db: Session, 
+        kb_id: str, 
+        user_id: str, 
+        update_data: KnowledgeBaseUpdate
+    ) -> Optional[KnowledgeBase]:
+        """
+        更新知识库信息
+        
+        Args:
+            db: 数据库会话
+            kb_id: 知识库ID
+            user_id: 用户ID
+            update_data: 更新数据
+            
+        Returns:
+            KnowledgeBase: 更新后的知识库对象
+        """
+        # 检查权限：只有创建者可以更新
+        kb = db.query(KnowledgeBase).filter(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.user_id == user_id,
+            KnowledgeBase.status == "active"
+        ).first()
+        
+        if not kb:
+            return None
+        
+        # 更新字段
+        if update_data.name is not None:
+            kb.name = update_data.name
+        if update_data.description is not None:
+            kb.description = update_data.description
+        if update_data.is_public is not None:
+            kb.is_public = update_data.is_public
+        if update_data.public_description is not None:
+            kb.public_description = update_data.public_description
+        if update_data.tags is not None:
+            kb.tags = json.dumps(update_data.tags, ensure_ascii=False)
+        
+        db.commit()
+        db.refresh(kb)
+        
+        logger.info(f"更新知识库: {kb_id}, 用户: {user_id}")
+        return kb
     
     def _collection_exists(self, collection_name: str) -> bool:
         """

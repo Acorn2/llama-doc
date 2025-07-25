@@ -201,6 +201,13 @@ class KnowledgeBase(Base):
     document_count = Column(Integer, default=0)         # 包含的文档数量
     status = Column(String, default="active")           # active, archived, deleted
     
+    # 公开访问相关字段
+    is_public = Column(Boolean, default=False)          # 是否公开
+    public_description = Column(Text, nullable=True)    # 公开描述（可与private description不同）
+    tags = Column(String, nullable=True)                # 标签，用于分类和搜索，JSON格式存储
+    view_count = Column(Integer, default=0)             # 浏览次数
+    like_count = Column(Integer, default=0)             # 点赞次数
+    
     # 建立关系
     user = relationship("User", back_populates="knowledge_bases")
     conversations = relationship("Conversation", back_populates="knowledge_base")
@@ -211,6 +218,8 @@ class KnowledgeBase(Base):
             Index('idx_kb_status', 'status'),
             Index('idx_kb_create_time', 'create_time'),
             Index('idx_kb_user', 'user_id', 'status'),  # 用户知识库索引
+            Index('idx_kb_public', 'is_public', 'status'),  # 公开知识库索引
+            Index('idx_kb_public_create_time', 'is_public', 'create_time'),  # 公开知识库时间索引
         )
 
 class KnowledgeBaseDocument(Base):
@@ -226,6 +235,40 @@ class KnowledgeBaseDocument(Base):
     if DB_TYPE == "postgresql":
         __table_args__ = (
             Index('idx_kb_doc', 'kb_id', 'document_id'),
+        )
+
+class KnowledgeBaseAccess(Base):
+    """知识库访问记录模型"""
+    __tablename__ = "kb_access"
+    
+    id = Column(String, primary_key=True, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    access_type = Column(String, nullable=False)  # view, chat, like, unlike
+    access_time = Column(DateTime(timezone=True), server_default=func.now())
+    access_metadata = Column(Text, nullable=True)  # JSON格式，存储额外信息
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_kb_access_kb_user', 'kb_id', 'user_id'),
+            Index('idx_kb_access_time', 'access_time'),
+            Index('idx_kb_access_type', 'access_type'),
+        )
+
+class KnowledgeBaseLike(Base):
+    """知识库点赞记录模型"""
+    __tablename__ = "kb_likes"
+    
+    id = Column(String, primary_key=True, index=True)
+    kb_id = Column(String, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_kb_like_unique', 'kb_id', 'user_id', unique=True),  # 确保用户对同一知识库只能点赞一次
         )
 
 class Conversation(Base):
@@ -315,13 +358,38 @@ def create_tables():
     """创建数据库表，仅在表不存在时创建"""
     try:
         # 首先检查表是否已存在
-        if check_tables_exist():
-            logger.info("数据库表已存在，跳过创建")
+        inspector = inspect(engine)
+        existing_tables = inspector.get_table_names()
+        
+        required_tables = [
+            "users", "documents", "query_history", "knowledge_bases", 
+            "kb_documents", "kb_access", "kb_likes", "conversations", "messages"
+        ]
+        
+        missing_tables = [table for table in required_tables if table not in existing_tables]
+        
+        if not missing_tables:
+            logger.info("数据库表检查: 所有必需的表都已存在，跳过创建")
             return
-            
-        logger.info(f"开始创建数据库表 (数据库类型: {DB_TYPE}, URL: {DATABASE_URL})")
-        Base.metadata.create_all(bind=engine)
-        logger.info("数据库表创建成功")
+        
+        logger.info(f"开始创建缺失的数据库表: {missing_tables} (数据库类型: {DB_TYPE})")
+        
+        # 只创建缺失的表
+        try:
+            # 创建所有表，SQLAlchemy会自动跳过已存在的表
+            Base.metadata.create_all(bind=engine, checkfirst=True)
+            logger.info("数据库表创建/检查完成")
+        except Exception as create_error:
+            logger.warning(f"创建表时出现错误，但可能是因为表已存在: {create_error}")
+            # 再次检查表是否真的创建成功了
+            inspector = inspect(engine)
+            current_tables = inspector.get_table_names()
+            still_missing = [table for table in required_tables if table not in current_tables]
+            if still_missing:
+                logger.error(f"以下表仍然缺失: {still_missing}")
+                raise Exception(f"无法创建必需的表: {still_missing}")
+            else:
+                logger.info("所有必需的表都已存在（可能是之前创建的）")
         
         # 测试数据库连接
         test_db = get_db_session()
@@ -332,15 +400,19 @@ def create_tables():
         logger.error(f"创建数据库表失败: {e}")
         logger.error(f"数据库配置 - 类型: {DB_TYPE}, URL: {DATABASE_URL}")
         logger.error(f"连接池配置: {POOL_CONFIG}")
-        raise
+        # 不要抛出异常，让应用继续运行
+        logger.warning("数据库表创建失败，但应用将尝试继续运行")
 
 def check_tables_exist():
     """检查数据库表是否已存在"""
     try:
         inspector = inspect(engine)
         
-        # 检查核心表是否存在，增加用户表
-        required_tables = ["users", "documents", "query_history", "knowledge_bases", "kb_documents", "conversations", "messages"]
+        # 检查核心表是否存在，增加用户表和新的公开知识库相关表
+        required_tables = [
+            "users", "documents", "query_history", "knowledge_bases", 
+            "kb_documents", "kb_access", "kb_likes", "conversations", "messages"
+        ]
         existing_tables = [table for table in required_tables if inspector.has_table(table)]
         
         # 如果所有必需的表都存在，则返回True

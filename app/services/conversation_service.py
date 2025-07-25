@@ -22,6 +22,7 @@ class ConversationManager:
         self, 
         db: Session, 
         kb_id: str, 
+        user_id: str,
         title: Optional[str] = None
     ) -> Conversation:
         """
@@ -30,16 +31,33 @@ class ConversationManager:
         Args:
             db: 数据库会话
             kb_id: 知识库ID
+            user_id: 用户ID
             title: 对话标题，可选
             
         Returns:
             Conversation: 创建的对话对象
         """
-        # 检查知识库是否存在
+        # 检查知识库是否存在且用户有权限访问
         kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
         if not kb:
             logger.error(f"知识库不存在: {kb_id}")
             raise ValueError("知识库不存在")
+        
+        # 检查用户是否有权限访问知识库
+        # 用户可以访问自己的知识库或公开的知识库
+        if kb.user_id != user_id and not kb.is_public:
+            logger.error(f"用户 {user_id} 无权限访问知识库 {kb_id}")
+            raise ValueError("无权限访问该知识库")
+        
+        # 如果是公开知识库，记录访问
+        if kb.is_public and kb.user_id != user_id:
+            self.kb_manager.record_knowledge_base_access(
+                db=db,
+                kb_id=kb_id,
+                user_id=user_id,
+                access_type="chat",
+                metadata={"action": "create_conversation"}
+            )
         
         # 生成唯一ID
         conversation_id = str(uuid.uuid4())
@@ -51,6 +69,7 @@ class ConversationManager:
         # 创建对话记录
         conversation = Conversation(
             id=conversation_id,
+            user_id=user_id,
             kb_id=kb_id,
             title=title,
             status="active"
