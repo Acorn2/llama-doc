@@ -45,6 +45,9 @@ numpy>=1.24.0
 # JWT认证
 PyJWT>=2.8.0
 
+# Redis缓存
+redis>=5.0.0
+
 # Token处理 - 移除版本限制让pip自动选择
 tiktoken
 requests>=2.31.0

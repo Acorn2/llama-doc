@@ -137,7 +137,7 @@ class AppSettings(BaseSettings):
     
     # 安全配置
     secret_key: str = Field(default="your-secret-key", env="SECRET_KEY")
-    access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
+    access_token_expire_minutes: int = Field(default=10080, env="ACCESS_TOKEN_EXPIRE_MINUTES")  # 7天 = 7 * 24 * 60 = 10080分钟
     
     # 子配置
     database: DatabaseSettings = DatabaseSettings()

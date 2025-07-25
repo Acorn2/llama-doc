@@ -15,6 +15,7 @@ from app.schemas import (
 from app.services.user_service import user_service
 from app.services.auth_service import auth_service
 from app.core.dependencies import get_current_user, get_current_superuser
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -242,14 +243,76 @@ async def delete_user(
         logger.error(f"删除用户失败: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="删除失败")
 
+@router.post("/logout")
+async def logout_user(
+    current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
+    db: Session = Depends(get_db)
+):
+    """用户登出"""
+    try:
+        token = credentials.credentials
+        success = auth_service.logout(token)
+        
+        if success:
+            return {"success": True, "message": "登出成功"}
+        else:
+            return {"success": False, "message": "登出失败"}
+    except Exception as e:
+        logger.error(f"用户登出失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="登出失败")
+
+@router.post("/logout-all")
+async def logout_all_devices(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """登出所有设备"""
+    try:
+        success = auth_service.revoke_user_tokens(current_user.id)
+        
+        if success:
+            return {"success": True, "message": "已登出所有设备"}
+        else:
+            return {"success": False, "message": "操作失败"}
+    except Exception as e:
+        logger.error(f"登出所有设备失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="操作失败")
+
+@router.get("/active-sessions")
+async def get_active_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的活跃会话列表"""
+    try:
+        active_tokens = auth_service.get_user_active_tokens(current_user.id)
+        
+        return {
+            "success": True,
+            "data": {
+                "active_sessions": active_tokens,
+                "total": len(active_tokens)
+            },
+            "message": "获取活跃会话成功"
+        }
+    except Exception as e:
+        logger.error(f"获取活跃会话失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取会话信息失败")
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
     db: Session = Depends(get_db)
 ):
     """刷新访问令牌"""
     try:
-        # 重新生成token
+        # 撤销当前token
+        old_token = credentials.credentials
+        auth_service.revoke_token(old_token)
+        
+        # 生成新token
         token_data = auth_service.create_access_token(current_user)
         
         user_response = UserResponse(
