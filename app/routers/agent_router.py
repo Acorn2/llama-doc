@@ -4,7 +4,7 @@ Agent API路由
 """
 
 import logging
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.schemas.agent_schemas import (
@@ -17,6 +17,9 @@ from app.schemas.agent_schemas import (
 from app.schemas import ChatStreamChunk
 from app.services.agent_service import AgentService
 from app.api.dependencies import get_agent_service_dep, handle_service_exceptions
+from app.core.dependencies import get_current_user
+from app.database import User, get_db
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["Agent"])
@@ -24,68 +27,153 @@ router = APIRouter(prefix="/agent", tags=["Agent"])
 @router.post("/chat", response_model=AgentChatResponse, summary="Agent对话")
 @handle_service_exceptions
 async def agent_chat(
-    request: AgentChatRequest,
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    request_data: AgentChatRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     与Agent进行对话
     支持Agent模式和普通对话模式
     """
     result = await agent_service.chat_with_agent(
-        kb_id=request.kb_id,
-        message=request.message,
-        conversation_id=request.conversation_id,
-        use_agent=request.use_agent,
-        llm_type=request.llm_type
+        kb_id=request_data.kb_id,
+        message=request_data.message,
+        conversation_id=request_data.conversation_id,
+        use_agent=request_data.use_agent,
+        llm_type=request_data.llm_type
     )
+    
+    # 记录Agent对话活动
+    from app.utils.activity_logger import log_user_activity
+    from app.schemas import ActivityType
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.AGENT_CHAT,
+        description=f"Agent对话: {request_data.message[:50]}...",
+        request=request,
+        resource_type="knowledge_base",
+        resource_id=request_data.kb_id,
+        metadata={
+            "message_length": len(request_data.message),
+            "use_agent": request_data.use_agent,
+            "llm_type": request_data.llm_type
+        }
+    )
+    
     return result
 
 @router.post("/analyze", response_model=DocumentAnalysisResponse, summary="文档分析")
 @handle_service_exceptions
 async def analyze_document(
-    request: DocumentAnalysisRequest,
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    request_data: DocumentAnalysisRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     使用Agent分析文档内容
     """
     result = await agent_service.analyze_document(
-        kb_id=request.kb_id,
-        query=request.query,
-        llm_type=request.llm_type
+        kb_id=request_data.kb_id,
+        query=request_data.query,
+        llm_type=request_data.llm_type
     )
+    
+    # 记录Agent分析活动
+    from app.utils.activity_logger import log_user_activity
+    from app.schemas import ActivityType
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.AGENT_ANALYZE,
+        description=f"Agent文档分析: {request_data.query[:50]}...",
+        request=request,
+        resource_type="knowledge_base",
+        resource_id=request_data.kb_id,
+        metadata={
+            "query": request_data.query,
+            "llm_type": request_data.llm_type
+        }
+    )
+    
     return result
 
 @router.post("/search", response_model=KnowledgeSearchResponse, summary="知识搜索")
 @handle_service_exceptions
 async def search_knowledge(
-    request: KnowledgeSearchRequest,
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    request_data: KnowledgeSearchRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     在知识库中搜索信息
     """
     result = await agent_service.search_knowledge(
-        kb_id=request.kb_id,
-        query=request.query,
-        max_results=request.max_results,
-        llm_type=request.llm_type
+        kb_id=request_data.kb_id,
+        query=request_data.query,
+        max_results=request_data.max_results,
+        llm_type=request_data.llm_type
     )
+    
+    # 记录Agent搜索活动
+    from app.utils.activity_logger import log_user_activity
+    from app.schemas import ActivityType
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.AGENT_SEARCH,
+        description=f"Agent知识搜索: {request_data.query[:50]}...",
+        request=request,
+        resource_type="knowledge_base",
+        resource_id=request_data.kb_id,
+        metadata={
+            "query": request_data.query,
+            "max_results": request_data.max_results,
+            "llm_type": request_data.llm_type
+        }
+    )
+    
     return result
 
 @router.post("/summary", response_model=SummaryResponse, summary="生成摘要")
 @handle_service_exceptions
 async def generate_summary(
-    request: SummaryRequest,
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    request_data: SummaryRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     生成文档摘要
     """
     result = await agent_service.generate_summary(
-        kb_id=request.kb_id,
-        llm_type=request.llm_type
+        kb_id=request_data.kb_id,
+        llm_type=request_data.llm_type
     )
+    
+    # 记录Agent摘要生成活动
+    from app.utils.activity_logger import log_user_activity
+    from app.schemas import ActivityType
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.AGENT_SUMMARY,
+        description="Agent生成文档摘要",
+        request=request,
+        resource_type="knowledge_base",
+        resource_id=request_data.kb_id,
+        metadata={
+            "llm_type": request_data.llm_type
+        }
+    )
+    
     return result
 
 @router.get("/history/{kb_id}", response_model=ConversationHistoryResponse, summary="获取对话历史")

@@ -294,4 +294,74 @@ class ChatStreamChunk(BaseModel):
     content: str = Field(..., description="内容块")
     is_final: bool = Field(False, description="是否为最后一块")
     sources: Optional[List[Dict[str, Any]]] = Field(None, description="引用来源，仅在最后一块包含")
-    processing_time: Optional[float] = Field(None, description="处理时间，仅在最后一块包含") 
+    processing_time: Optional[float] = Field(None, description="处理时间，仅在最后一块包含")
+
+# 用户活动记录相关模型
+class ActivityType(str, Enum):
+    """活动类型枚举"""
+    # 用户认证相关
+    USER_LOGIN = "user_login"
+    USER_LOGOUT = "user_logout"
+    USER_REGISTER = "user_register"
+    
+    # 文档相关
+    DOCUMENT_UPLOAD = "document_upload"
+    DOCUMENT_DELETE = "document_delete"
+    DOCUMENT_VIEW = "document_view"
+    DOCUMENT_DOWNLOAD = "document_download"
+    
+    # 知识库相关
+    KB_CREATE = "kb_create"
+    KB_UPDATE = "kb_update"
+    KB_DELETE = "kb_delete"
+    KB_VIEW = "kb_view"
+    KB_LIKE = "kb_like"
+    KB_UNLIKE = "kb_unlike"
+    KB_SHARE = "kb_share"
+    
+    # 对话相关
+    CONVERSATION_CREATE = "conversation_create"
+    CONVERSATION_CHAT = "conversation_chat"
+    CONVERSATION_DELETE = "conversation_delete"
+    
+    # Agent相关
+    AGENT_CHAT = "agent_chat"
+    AGENT_ANALYZE = "agent_analyze"
+    AGENT_SEARCH = "agent_search"
+    AGENT_SUMMARY = "agent_summary"
+    
+    # 系统相关
+    SYSTEM_ACCESS = "system_access"
+
+class UserActivityCreate(BaseModel):
+    """创建用户活动记录请求模型"""
+    activity_type: ActivityType = Field(..., description="活动类型")
+    activity_description: str = Field(..., description="活动描述")
+    resource_type: Optional[str] = Field(None, description="资源类型")
+    resource_id: Optional[str] = Field(None, description="资源ID")
+    activity_metadata: Optional[Dict[str, Any]] = Field(None, description="活动元数据")
+    ip_address: Optional[str] = Field(None, description="IP地址")
+    user_agent: Optional[str] = Field(None, description="用户代理")
+
+class UserActivityResponse(BaseModel):
+    """用户活动记录响应模型"""
+    id: str = Field(..., description="活动记录ID")
+    user_id: str = Field(..., description="用户ID")
+    activity_type: str = Field(..., description="活动类型")
+    activity_description: str = Field(..., description="活动描述")
+    resource_type: Optional[str] = Field(None, description="资源类型")
+    resource_id: Optional[str] = Field(None, description="资源ID")
+    activity_metadata: Optional[Dict[str, Any]] = Field(None, description="活动元数据")
+    ip_address: Optional[str] = Field(None, description="IP地址")
+    user_agent: Optional[str] = Field(None, description="用户代理")
+    create_time: datetime = Field(..., description="创建时间")
+    
+    class Config:
+        from_attributes = True
+
+class UserActivityListResponse(BaseModel):
+    """用户活动记录列表响应模型"""
+    success: bool = Field(..., description="是否成功")
+    message: str = Field(..., description="响应消息")
+    activities: List[UserActivityResponse] = Field(..., description="活动记录列表")
+    total: int = Field(..., description="总数") 

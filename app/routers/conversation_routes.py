@@ -4,13 +4,14 @@
 import logging
 import time
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import json
 
-from app.database import get_db, Conversation, Message
+from app.database import get_db, Conversation, Message, User
+from app.core.dependencies import get_current_user
 from app.schemas import (
     ConversationCreate, 
     MessageCreate,

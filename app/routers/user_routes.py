@@ -2,7 +2,7 @@
 用户管理相关的API路由
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -10,7 +10,7 @@ from typing import Optional, List
 from app.database import get_db, User
 from app.schemas import (
     UserCreate, UserUpdate, UserLogin, UserResponse, UserListResponse, 
-    TokenResponse
+    TokenResponse, UserActivityResponse
 )
 from app.services.user_service import user_service
 from app.services.auth_service import auth_service
@@ -30,11 +30,25 @@ router = APIRouter(
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
     user_data: UserCreate,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """用户注册"""
     try:
         user = user_service.create_user(db, user_data)
+        
+        # 记录用户注册活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=user,
+            activity_type=ActivityType.USER_REGISTER,
+            description=f"用户注册成功: {user.username or user.email or user.phone}",
+            request=request,
+            metadata={"registration_method": "email" if user.email else "phone"}
+        )
+        
         return UserResponse(
             id=user.id,
             username=user.username,
@@ -57,6 +71,7 @@ async def register_user(
 @router.post("/login", response_model=TokenResponse)
 async def login_user(
     login_data: UserLogin,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """用户登录"""
@@ -67,6 +82,19 @@ async def login_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="用户名或密码错误"
             )
+        
+        # 记录用户登录活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=token_response.user,
+            activity_type=ActivityType.USER_LOGIN,
+            description=f"用户登录成功: {login_data.login_credential}",
+            request=request,
+            metadata={"login_credential": login_data.login_credential}
+        )
+        
         return token_response
     except HTTPException:
         raise
@@ -245,6 +273,7 @@ async def delete_user(
 
 @router.post("/logout")
 async def logout_user(
+    request: Request,
     current_user: User = Depends(get_current_user),
     credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
     db: Session = Depends(get_db)
@@ -253,6 +282,17 @@ async def logout_user(
     try:
         token = credentials.credentials
         success = auth_service.logout(token)
+        
+        # 记录用户登出活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.USER_LOGOUT,
+            description="用户登出",
+            request=request
+        )
         
         if success:
             return {"success": True, "message": "登出成功"}
@@ -337,4 +377,59 @@ async def refresh_token(
         )
     except Exception as e:
         logger.error(f"刷新令牌失败: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="刷新令牌失败") 
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="刷新令牌失败")
+
+@router.get("/activities", response_model=List[UserActivityResponse])
+async def get_user_activities(
+    limit: int = 5,
+    activity_type: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的活动记录"""
+    try:
+        from app.services.activity_service import activity_service
+        
+        activities = activity_service.get_user_activities(
+            db, current_user.id, limit=limit, activity_type=activity_type
+        )
+        
+        return [
+            UserActivityResponse(
+                id=activity.id,
+                user_id=activity.user_id,
+                activity_type=activity.activity_type,
+                activity_description=activity.activity_description,
+                resource_type=activity.resource_type,
+                resource_id=activity.resource_id,
+                activity_metadata=activity.activity_metadata,
+                ip_address=activity.ip_address,
+                user_agent=activity.user_agent,
+                create_time=activity.create_time
+            )
+            for activity in activities
+        ]
+    except Exception as e:
+        logger.error(f"获取用户活动记录失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取活动记录失败")
+
+@router.get("/activities/stats")
+async def get_user_activity_stats(
+    days: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取用户活动统计"""
+    try:
+        from app.services.activity_service import activity_service
+        
+        stats = activity_service.get_activity_stats(db, current_user.id, days=days)
+        
+        return {
+            "success": True,
+            "data": stats,
+            "message": "获取活动统计成功"
+        }
+    except Exception as e:
+        logger.error(f"获取用户活动统计失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取活动统计失败") 

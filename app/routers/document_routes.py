@@ -7,10 +7,11 @@ import time
 import logging
 from datetime import datetime
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 
-from app.database import get_db, Document
+from app.database import get_db, Document, User
+from app.core.dependencies import get_current_user
 from app.schemas import (
     DocumentUploadResponse, TaskStatus, DocumentInfo, 
     DocumentStatusResponse, DuplicateCheckResponse
@@ -33,7 +34,9 @@ router = APIRouter(
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """上传PDF文档 - 支持重复检测和腾讯云COS存储"""
@@ -103,6 +106,7 @@ async def upload_document(
             # 创建数据库记录
             db_document = Document(
                 id=document_id,
+                user_id=current_user.id,  # 关联用户
                 filename=file.filename,
                 file_path=storage_result["file_path"],
                 file_size=storage_result["file_size"],
@@ -117,6 +121,25 @@ async def upload_document(
             )
             db.add(db_document)
             db.commit()
+            
+            # 记录文档上传活动
+            from app.utils.activity_logger import log_user_activity
+            from app.schemas import ActivityType
+            log_user_activity(
+                db=db,
+                user=current_user,
+                activity_type=ActivityType.DOCUMENT_UPLOAD,
+                description=f"上传文档: {file.filename}",
+                request=request,
+                resource_type="document",
+                resource_id=document_id,
+                metadata={
+                    "filename": file.filename,
+                    "file_size": storage_result["file_size"],
+                    "file_type": file_type.value,
+                    "storage_type": storage_result["storage_type"]
+                }
+            )
             
             storage_info = "腾讯云COS" if storage_result["storage_type"] == "cos" else "本地存储"
             logger.info(f"新文档上传成功({storage_info})，类型: {file_type.value}，等待处理: {document_id}")
@@ -145,11 +168,32 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"文档上传失败: {str(e)}")
 
 @router.get("/{document_id}/status", response_model=DocumentStatusResponse)
-async def get_document_status(document_id: str, db: Session = Depends(get_db)):
+async def get_document_status(
+    document_id: str, 
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """获取文档处理状态"""
-    document = db.query(Document).filter(Document.id == document_id).first()
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id  # 只能查看自己的文档
+    ).first()
     if not document:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise HTTPException(status_code=404, detail="文档不存在或无权限访问")
+    
+    # 记录文档查看活动
+    from app.utils.activity_logger import log_user_activity
+    from app.schemas import ActivityType
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.DOCUMENT_VIEW,
+        description=f"查看文档状态: {document.filename}",
+        request=request,
+        resource_type="document",
+        resource_id=document_id
+    )
     
     # 计算进度
     progress = 0
@@ -176,11 +220,32 @@ async def get_document_status(document_id: str, db: Session = Depends(get_db)):
     )
 
 @router.get("/{document_id}", response_model=DocumentInfo)
-async def get_document_info(document_id: str, db: Session = Depends(get_db)):
+async def get_document_info(
+    document_id: str, 
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """获取文档详细信息"""
-    document = db.query(Document).filter(Document.id == document_id).first()
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id  # 只能查看自己的文档
+    ).first()
     if not document:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise HTTPException(status_code=404, detail="文档不存在或无权限访问")
+    
+    # 记录文档查看活动
+    from app.utils.activity_logger import log_user_activity
+    from app.schemas import ActivityType
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.DOCUMENT_VIEW,
+        description=f"查看文档详情: {document.filename}",
+        request=request,
+        resource_type="document",
+        resource_id=document_id
+    )
     
     from app.schemas import FileType
     
@@ -199,9 +264,16 @@ async def get_document_info(document_id: str, db: Session = Depends(get_db)):
     )
 
 @router.get("", response_model=List[DocumentInfo])
-async def list_documents(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
-    """获取文档列表"""
-    documents = db.query(Document).offset(skip).limit(limit).all()
+async def list_documents(
+    skip: int = 0, 
+    limit: int = 20, 
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的文档列表"""
+    documents = db.query(Document).filter(
+        Document.user_id == current_user.id  # 只显示当前用户的文档
+    ).offset(skip).limit(limit).all()
     
     from app.schemas import FileType
     
@@ -223,11 +295,19 @@ async def list_documents(skip: int = 0, limit: int = 20, db: Session = Depends(g
     ]
 
 @router.delete("/{document_id}")
-async def delete_document(document_id: str, db: Session = Depends(get_db)):
+async def delete_document(
+    document_id: str, 
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """删除文档及其相关资源"""
-    document = db.query(Document).filter(Document.id == document_id).first()
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id  # 只能删除自己的文档
+    ).first()
     if not document:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise HTTPException(status_code=404, detail="文档不存在或无权限删除")
     
     try:
         # 删除向量存储中的文档
@@ -255,6 +335,20 @@ async def delete_document(document_id: str, db: Session = Depends(get_db)):
         db.commit()
         logger.info(f"已删除文档 {document_id} 的数据库记录")
         
+        # 记录文档删除活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.DOCUMENT_DELETE,
+            description=f"删除文档: {document.filename}",
+            request=request,
+            resource_type="document",
+            resource_id=document_id,
+            metadata={"filename": document.filename}
+        )
+        
         return {"message": f"文档 {document_id} 已成功删除"}
     except Exception as e:
         db.rollback()
@@ -262,11 +356,19 @@ async def delete_document(document_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"删除文档失败: {str(e)}")
 
 @router.get("/{document_id}/download")
-async def download_document(document_id: str, db: Session = Depends(get_db)):
+async def download_document(
+    document_id: str, 
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """下载文档 - 返回下载链接"""
-    document = db.query(Document).filter(Document.id == document_id).first()
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id  # 只能下载自己的文档
+    ).first()
     if not document:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise HTTPException(status_code=404, detail="文档不存在或无权限下载")
     
     try:
         # 获取文件下载URL
@@ -282,6 +384,20 @@ async def download_document(document_id: str, db: Session = Depends(get_db)):
         if not download_info["success"]:
             raise HTTPException(status_code=500, detail=download_info["error"])
         
+        # 记录文档下载活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.DOCUMENT_DOWNLOAD,
+            description=f"下载文档: {document.filename}",
+            request=request,
+            resource_type="document",
+            resource_id=document_id,
+            metadata={"filename": document.filename}
+        )
+        
         return {
             "document_id": document_id,
             "filename": document.filename,
@@ -296,6 +412,7 @@ async def download_document(document_id: str, db: Session = Depends(get_db)):
 @router.post("/check-duplicate", response_model=DuplicateCheckResponse)
 async def check_duplicate_document(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """检查文档是否重复（基于MD5）"""

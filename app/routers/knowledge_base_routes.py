@@ -2,7 +2,7 @@
 知识库相关的API路由
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -35,7 +35,8 @@ kb_manager = KnowledgeBaseManager()
 
 @router.post("/", response_model=KnowledgeBaseResponse, status_code=status.HTTP_201_CREATED)
 async def create_knowledge_base(
-    request: KnowledgeBaseCreate,
+    request_data: KnowledgeBaseCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -43,8 +44,26 @@ async def create_knowledge_base(
     try:
         kb = kb_manager.create_knowledge_base(
             db=db,
-            kb_data=request,
+            kb_data=request_data,
             user_id=current_user.id
+        )
+        
+        # 记录知识库创建活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.KB_CREATE,
+            description=f"创建知识库: {kb.name}",
+            request=request,
+            resource_type="knowledge_base",
+            resource_id=kb.id,
+            metadata={
+                "name": kb.name,
+                "is_public": kb.is_public,
+                "description": kb.description
+            }
         )
         
         # 解析标签

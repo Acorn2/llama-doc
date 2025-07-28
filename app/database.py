@@ -321,6 +321,32 @@ class Message(Base):
             Index('idx_conversation_sequence', 'conversation_id', 'sequence_number'),  # 新增复合索引
         )
 
+class UserActivity(Base):
+    """用户活动记录数据模型"""
+    __tablename__ = "user_activities"
+    
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    activity_type = Column(String, nullable=False, index=True)  # 活动类型
+    activity_description = Column(String, nullable=False)  # 活动描述
+    resource_type = Column(String, nullable=True, index=True)  # 资源类型：document, knowledge_base, conversation等
+    resource_id = Column(String, nullable=True, index=True)  # 资源ID
+    activity_metadata = Column(Text, nullable=True)  # JSON格式的活动元数据
+    ip_address = Column(String, nullable=True)  # IP地址
+    user_agent = Column(String, nullable=True)  # 用户代理
+    create_time = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    
+    # 建立关系
+    user = relationship("User")
+    
+    # 根据数据库类型添加索引
+    if DB_TYPE == "postgresql":
+        __table_args__ = (
+            Index('idx_activity_user_time', 'user_id', 'create_time'),  # 用户活动时间索引
+            Index('idx_activity_type_time', 'activity_type', 'create_time'),  # 活动类型时间索引
+            Index('idx_activity_resource', 'resource_type', 'resource_id'),  # 资源索引
+        )
+
 def get_db_session():
     """获取数据库会话，带重试机制"""
     max_retries = 3
@@ -363,7 +389,7 @@ def create_tables():
         
         required_tables = [
             "users", "documents", "query_history", "knowledge_bases", 
-            "kb_documents", "kb_access", "kb_likes", "conversations", "messages"
+            "kb_documents", "kb_access", "kb_likes", "conversations", "messages", "user_activities"
         ]
         
         missing_tables = [table for table in required_tables if table not in existing_tables]
@@ -411,7 +437,7 @@ def check_tables_exist():
         # 检查核心表是否存在，增加用户表和新的公开知识库相关表
         required_tables = [
             "users", "documents", "query_history", "knowledge_bases", 
-            "kb_documents", "kb_access", "kb_likes", "conversations", "messages"
+            "kb_documents", "kb_access", "kb_likes", "conversations", "messages", "user_activities"
         ]
         existing_tables = [table for table in required_tables if inspector.has_table(table)]
         
