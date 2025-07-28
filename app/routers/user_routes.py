@@ -2,6 +2,7 @@
 用户管理相关的API路由
 """
 import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -151,6 +152,107 @@ async def update_current_user(
     except Exception as e:
         logger.error(f"更新用户信息失败: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新失败")
+
+# @router.get("/activities")
+# async def get_user_activities(
+#     limit: int = 5,
+#     activity_type: Optional[str] = None,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """获取当前用户的活动记录"""
+#     logger.info(f"🔍 进入 get_user_activities 方法 - 用户ID: {current_user.id}")
+    
+#     # 简单返回测试数据
+#     return {
+#         "message": "活动记录接口正常",
+#         "user_id": current_user.id,
+#         "limit": limit,
+#         "activity_type": activity_type
+#     }
+
+@router.get("/activities", response_model=List[UserActivityResponse])
+async def get_user_activities(
+    limit: int = 5,
+    activity_type: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取当前用户的活动记录"""
+    try:
+        from app.services.activity_service import activity_service
+        
+        activities = activity_service.get_user_activities(
+            db, current_user.id, limit=limit, activity_type=activity_type
+        )
+        
+        return [
+            UserActivityResponse(
+                id=activity.id,
+                user_id=activity.user_id,
+                activity_type=activity.activity_type,
+                activity_description=activity.activity_description,
+                resource_type=activity.resource_type,
+                resource_id=activity.resource_id,
+                activity_metadata=activity.activity_metadata,
+                ip_address=activity.ip_address,
+                user_agent=activity.user_agent,
+                create_time=activity.create_time
+            )
+            for activity in activities
+        ]
+    except Exception as e:
+        logger.error(f"获取用户活动记录失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取活动记录失败")
+
+@router.get("/activities/stats")
+async def get_user_activity_stats(
+    days: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取用户活动统计"""
+    try:
+        from app.services.activity_service import activity_service
+        
+        stats = activity_service.get_activity_stats(db, current_user.id, days=days)
+        
+        return {
+            "success": True,
+            "data": stats,
+            "message": "获取活动统计成功"
+        }
+    except Exception as e:
+        logger.error(f"获取用户活动统计失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取活动统计失败")
+
+@router.get("/dashboard/stats")
+async def get_dashboard_stats(
+    period: str = "30d",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取用户仪表板统计数据"""
+    try:
+        from app.services.activity_service import activity_service
+        from app.schemas import DashboardStatsResponse, DashboardStatsData
+        
+        # 验证period参数
+        if period not in ["7d", "30d", "90d"]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的统计周期")
+        
+        stats_data = activity_service.get_dashboard_stats(db, current_user.id, period)
+        
+        return {
+            "success": True,
+            "data": stats_data,
+            "message": "获取仪表板统计成功"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取仪表板统计失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取仪表板统计失败")
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
@@ -379,57 +481,57 @@ async def refresh_token(
         logger.error(f"刷新令牌失败: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="刷新令牌失败")
 
-@router.get("/activities", response_model=List[UserActivityResponse])
-async def get_user_activities(
-    limit: int = 5,
-    activity_type: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+async def debug_get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
     db: Session = Depends(get_db)
-):
-    """获取当前用户的活动记录"""
+) -> User:
+    """调试版本的 get_current_user，添加详细日志"""
+    logger.info("🔐 开始用户认证过程...")
+    
     try:
-        from app.services.activity_service import activity_service
+        # 检查认证凭据
+        if not credentials:
+            logger.error("❌ 没有提供认证凭据")
+            raise HTTPException(status_code=401, detail="未提供认证凭据")
         
-        activities = activity_service.get_user_activities(
-            db, current_user.id, limit=limit, activity_type=activity_type
-        )
+        token = credentials.credentials
+        logger.info(f"🔑 提取到token: {token[:20]}...")
         
-        return [
-            UserActivityResponse(
-                id=activity.id,
-                user_id=activity.user_id,
-                activity_type=activity.activity_type,
-                activity_description=activity.activity_description,
-                resource_type=activity.resource_type,
-                resource_id=activity.resource_id,
-                activity_metadata=activity.activity_metadata,
-                ip_address=activity.ip_address,
-                user_agent=activity.user_agent,
-                create_time=activity.create_time
-            )
-            for activity in activities
-        ]
+        # 调用原始的认证逻辑
+        from app.core.dependencies import get_current_user
+        
+        logger.info("🔄 调用原始认证逻辑...")
+        user = get_current_user(credentials, db)
+        
+        logger.info(f"✅ 用户认证成功: {user.id} - {user.username or user.email}")
+        return user
+        
+    except HTTPException as http_ex:
+        logger.error(f"❌ HTTP认证异常: {http_ex.status_code} - {http_ex.detail}")
+        raise
     except Exception as e:
-        logger.error(f"获取用户活动记录失败: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取活动记录失败")
+        logger.error(f"❌ 认证过程异常: {str(e)}")
+        logger.error(f"❌ 异常类型: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ 异常堆栈: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"认证失败: {str(e)}")
 
-@router.get("/activities/stats")
-async def get_user_activity_stats(
-    days: int = 30,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+@router.get("/test-auth")
+async def test_auth_debug():
+    """测试认证的简单接口，不依赖任何认证"""
+    logger.info("🧪 测试接口被调用 - 无需认证")
+    return {"message": "测试接口正常", "timestamp": datetime.now().isoformat()}
+
+@router.get("/test-auth-required")
+async def test_auth_required_debug(
+    current_user: User = Depends(get_current_user)
 ):
-    """获取用户活动统计"""
-    try:
-        from app.services.activity_service import activity_service
-        
-        stats = activity_service.get_activity_stats(db, current_user.id, days=days)
-        
-        return {
-            "success": True,
-            "data": stats,
-            "message": "获取活动统计成功"
-        }
-    except Exception as e:
-        logger.error(f"获取用户活动统计失败: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取活动统计失败") 
+    """测试需要认证的简单接口"""
+    logger.info(f"🧪 进入 test_auth_required_debug 方法 - 用户: {current_user.id}")
+    return {
+        "message": "认证测试成功", 
+        "user_id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "timestamp": datetime.now().isoformat()
+    } 

@@ -1,59 +1,71 @@
 #!/usr/bin/env python3
 """
-测试语法修复是否有效
+测试语法修复后的认证问题
 """
-import ast
-import sys
+import requests
+import json
+import logging
 
-def check_syntax(file_path):
-    """检查文件语法是否正确"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            source = f.read()
-        
-        # 解析AST
-        ast.parse(source)
-        print(f"✅ {file_path} - 语法正确")
-        return True
-    except SyntaxError as e:
-        print(f"❌ {file_path} - 语法错误: {e}")
-        print(f"   行 {e.lineno}: {e.text}")
-        return False
-    except Exception as e:
-        print(f"⚠️ {file_path} - 其他错误: {e}")
-        return False
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def main():
-    """主测试函数"""
-    print("🔍 检查用户活动记录功能相关文件的语法...")
+BASE_URL = "http://localhost:8000"
+
+def test_specific_endpoints():
+    """测试特定的端点"""
     
-    files_to_check = [
-        "app/database.py",
-        "app/schemas.py",
-        "app/services/activity_service.py",
-        "app/utils/activity_logger.py",
-        "app/routers/user_routes.py",
-        "app/routers/document_routes.py",
-        "app/routers/knowledge_base_routes.py",
-        "app/routers/agent_router.py",
-        "app/routers/conversation_routes.py"
-    ]
+    # 1. 登录获取token
+    login_data = {
+        "login_credential": "test@example.com",
+        "password": "password123"
+    }
     
-    all_passed = True
+    response = requests.post(f"{BASE_URL}/api/v1/users/login", json=login_data)
+    if response.status_code != 200:
+        logger.error(f"登录失败: {response.text}")
+        return
     
-    for file_path in files_to_check:
-        if not check_syntax(file_path):
-            all_passed = False
+    token = response.json().get("access_token")
+    headers = {"Authorization": f"Bearer {token}"}
     
-    print("\n" + "="*50)
-    if all_passed:
-        print("🎉 所有文件语法检查通过！")
-        print("现在可以尝试重启服务了。")
+    # 2. 测试 /users/me 接口（应该工作）
+    logger.info("🧪 测试 /users/me 接口...")
+    response = requests.get(f"{BASE_URL}/api/v1/users/me", headers=headers)
+    logger.info(f"/users/me 响应: {response.status_code}")
+    if response.status_code == 200:
+        logger.info("✅ /users/me 正常工作")
     else:
-        print("⚠️ 部分文件存在语法错误，请修复后再重启服务。")
+        logger.error(f"❌ /users/me 失败: {response.text}")
     
-    return all_passed
+    # 3. 测试 /users/test-auth-required 接口
+    logger.info("🧪 测试 /users/test-auth-required 接口...")
+    response = requests.get(f"{BASE_URL}/api/v1/users/test-auth-required", headers=headers)
+    logger.info(f"/users/test-auth-required 响应: {response.status_code}")
+    if response.status_code == 200:
+        logger.info("✅ /users/test-auth-required 正常工作")
+    else:
+        logger.error(f"❌ /users/test-auth-required 失败: {response.text}")
+    
+    # 4. 测试 /users/activities 接口
+    logger.info("🧪 测试 /users/activities 接口...")
+    response = requests.get(f"{BASE_URL}/api/v1/users/activities", headers=headers)
+    logger.info(f"/users/activities 响应: {response.status_code}")
+    if response.status_code == 200:
+        logger.info("✅ /users/activities 正常工作")
+        activities = response.json()
+        logger.info(f"活动记录数量: {len(activities)}")
+    else:
+        logger.error(f"❌ /users/activities 失败: {response.text}")
+    
+    # 5. 测试 /users/activities/stats 接口
+    logger.info("🧪 测试 /users/activities/stats 接口...")
+    response = requests.get(f"{BASE_URL}/api/v1/users/activities/stats", headers=headers)
+    logger.info(f"/users/activities/stats 响应: {response.status_code}")
+    if response.status_code == 200:
+        logger.info("✅ /users/activities/stats 正常工作")
+    else:
+        logger.error(f"❌ /users/activities/stats 失败: {response.text}")
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    test_specific_endpoints()

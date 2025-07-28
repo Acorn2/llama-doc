@@ -10,13 +10,20 @@ from app.database import get_db, User
 from app.services.auth_service import auth_service
 
 # 安全方案
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
     """获取当前认证用户"""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="认证失败",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     try:
         token = credentials.credentials
         user = auth_service.get_current_user(db, token)

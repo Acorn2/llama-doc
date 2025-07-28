@@ -530,6 +530,40 @@ class UserActivityListResponse(BaseModel):
     activities: List[UserActivityResponse] = Field(..., description="活动记录列表")
     total: int = Field(..., description="总数")
 
+# 仪表板统计相关模型
+class DashboardStatsItem(BaseModel):
+    """仪表板统计项模型"""
+    total: int = Field(..., description="总数")
+    growth_rate: float = Field(..., description="增长率")
+    growth_count: int = Field(..., description="增长数量")
+
+class ConversationStatsItem(BaseModel):
+    """对话统计项模型"""
+    today: int = Field(..., description="今日数量")
+    growth_rate: float = Field(..., description="增长率")
+    yesterday: int = Field(..., description="昨日数量")
+
+class ActivitySummaryItem(BaseModel):
+    """活动摘要项模型"""
+    activity_type: str = Field(..., description="活动类型")
+    count: int = Field(..., description="数量")
+    percentage: float = Field(..., description="百分比")
+
+class DashboardStatsData(BaseModel):
+    """仪表板统计数据模型"""
+    document_stats: DashboardStatsItem = Field(..., description="文档统计")
+    knowledge_base_stats: DashboardStatsItem = Field(..., description="知识库统计")
+    conversation_stats: ConversationStatsItem = Field(..., description="对话统计")
+    activity_summary: Dict[str, Any] = Field(..., description="活动摘要")
+    period: str = Field(..., description="统计周期")
+    last_updated: datetime = Field(..., description="最后更新时间")
+
+class DashboardStatsResponse(BaseModel):
+    """仪表板统计响应模型"""
+    success: bool = Field(..., description="是否成功")
+    data: DashboardStatsData = Field(..., description="统计数据")
+    message: str = Field(..., description="响应消息")
+
 # 错误响应模型（兼容性）
 class ErrorResponse(BaseModel):
     """错误响应"""
@@ -559,6 +593,12 @@ __all__ = [
     "UserActivityCreate",
     "UserActivityResponse",
     "UserActivityListResponse",
+    # 仪表板统计相关模式
+    "DashboardStatsItem",
+    "ConversationStatsItem", 
+    "ActivitySummaryItem",
+    "DashboardStatsData",
+    "DashboardStatsResponse",
     # 新架构的Agent模式
     "AgentChatRequest",
     "AgentChatResponse", 

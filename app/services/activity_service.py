@@ -95,26 +95,54 @@ class ActivityService:
         activity_type: Optional[str] = None
     ) -> List[UserActivity]:
         """获取用户活动记录"""
+        logger.info(f"🔍 ActivityService.get_user_activities 开始 - user_id: {user_id}, limit: {limit}, activity_type: {activity_type}")
+        
         try:
+            # 构建基础查询
+            logger.info("🔄 构建数据库查询...")
             query = db.query(UserActivity).filter(UserActivity.user_id == user_id)
+            logger.info(f"✅ 基础查询构建完成，过滤用户ID: {user_id}")
             
+            # 添加活动类型过滤
             if activity_type:
+                logger.info(f"🔄 添加活动类型过滤: {activity_type}")
                 query = query.filter(UserActivity.activity_type == activity_type)
             
-            activities = query.order_by(desc(UserActivity.create_time)).limit(limit).all()
+            # 添加排序和限制
+            logger.info(f"🔄 添加排序和限制，limit: {limit}")
+            query = query.order_by(desc(UserActivity.create_time)).limit(limit)
+            
+            # 执行查询
+            logger.info("🔄 执行数据库查询...")
+            activities = query.all()
+            logger.info(f"📊 查询完成，获取到 {len(activities)} 条记录")
+            
+            # 检查每条记录
+            for i, activity in enumerate(activities):
+                logger.info(f"📝 记录 {i+1}: ID={activity.id}, 类型={activity.activity_type}, 描述={activity.activity_description[:50]}...")
             
             # 反序列化元数据
-            for activity in activities:
+            logger.info("🔄 开始处理元数据...")
+            for i, activity in enumerate(activities):
                 if activity.activity_metadata:
                     try:
+                        logger.info(f"🔄 处理第 {i+1} 条记录的元数据...")
                         activity.activity_metadata = json.loads(activity.activity_metadata)
-                    except json.JSONDecodeError:
+                        logger.info(f"✅ 第 {i+1} 条记录元数据处理成功")
+                    except json.JSONDecodeError as json_error:
+                        logger.warning(f"⚠️ 第 {i+1} 条记录元数据JSON解析失败: {str(json_error)}")
                         activity.activity_metadata = None
+                else:
+                    logger.info(f"ℹ️ 第 {i+1} 条记录无元数据")
             
+            logger.info(f"🎉 ActivityService.get_user_activities 完成，返回 {len(activities)} 条记录")
             return activities
             
         except Exception as e:
-            logger.error(f"获取用户活动记录失败: {str(e)}")
+            logger.error(f"❌ ActivityService.get_user_activities 失败: {str(e)}")
+            logger.error(f"❌ 错误类型: {type(e).__name__}")
+            import traceback
+            logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
             return []
     
     def get_recent_activities(
@@ -186,6 +214,165 @@ class ActivityService:
         except Exception as e:
             logger.error(f"获取活动统计失败: {str(e)}")
             return {"total_activities": 0, "activity_by_type": {}, "period_days": days}
+    
+    def get_dashboard_stats(self, db: Session, user_id: str, period: str = "30d") -> Dict[str, Any]:
+        """获取用户仪表板统计数据"""
+        try:
+            from datetime import timedelta
+            
+            # 计算时间范围
+            days_map = {"7d": 7, "30d": 30, "90d": 90}
+            days = days_map.get(period, 30)
+            
+            current_date = datetime.utcnow()
+            start_date = current_date - timedelta(days=days)
+            previous_start_date = start_date - timedelta(days=days)
+            
+            # 获取文档统计
+            try:
+                from app.database import Document
+                current_doc_count = db.query(Document).filter(
+                    Document.user_id == user_id,
+                    Document.create_time >= start_date
+                ).count()
+                
+                previous_doc_count = db.query(Document).filter(
+                    Document.user_id == user_id,
+                    Document.create_time >= previous_start_date,
+                    Document.create_time < start_date
+                ).count()
+                
+                total_doc_count = db.query(Document).filter(
+                    Document.user_id == user_id
+                ).count()
+            except Exception:
+                # 如果Document表不存在或查询失败，使用默认值
+                current_doc_count = 0
+                previous_doc_count = 0
+                total_doc_count = 0
+            
+            doc_growth_rate = 0.0
+            if previous_doc_count > 0:
+                doc_growth_rate = (current_doc_count - previous_doc_count) / previous_doc_count
+            elif current_doc_count > 0:
+                doc_growth_rate = 1.0
+            
+            # 获取知识库统计
+            try:
+                from app.database import KnowledgeBase
+                current_kb_count = db.query(KnowledgeBase).filter(
+                    KnowledgeBase.user_id == user_id,
+                    KnowledgeBase.create_time >= start_date
+                ).count()
+                
+                previous_kb_count = db.query(KnowledgeBase).filter(
+                    KnowledgeBase.user_id == user_id,
+                    KnowledgeBase.create_time >= previous_start_date,
+                    KnowledgeBase.create_time < start_date
+                ).count()
+                
+                total_kb_count = db.query(KnowledgeBase).filter(
+                    KnowledgeBase.user_id == user_id
+                ).count()
+            except Exception:
+                # 如果KnowledgeBase表不存在或查询失败，使用默认值
+                current_kb_count = 0
+                previous_kb_count = 0
+                total_kb_count = 0
+            
+            kb_growth_rate = 0.0
+            if previous_kb_count > 0:
+                kb_growth_rate = (current_kb_count - previous_kb_count) / previous_kb_count
+            elif current_kb_count > 0:
+                kb_growth_rate = 1.0
+            
+            # 获取今日对话统计
+            today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            yesterday_start = today_start - timedelta(days=1)
+            
+            today_conversations = db.query(UserActivity).filter(
+                UserActivity.user_id == user_id,
+                UserActivity.activity_type.in_(['conversation_chat', 'agent_chat']),
+                UserActivity.create_time >= today_start
+            ).count()
+            
+            yesterday_conversations = db.query(UserActivity).filter(
+                UserActivity.user_id == user_id,
+                UserActivity.activity_type.in_(['conversation_chat', 'agent_chat']),
+                UserActivity.create_time >= yesterday_start,
+                UserActivity.create_time < today_start
+            ).count()
+            
+            conversation_growth_rate = 0.0
+            if yesterday_conversations > 0:
+                conversation_growth_rate = (today_conversations - yesterday_conversations) / yesterday_conversations
+            elif today_conversations > 0:
+                conversation_growth_rate = 1.0
+            
+            # 获取活动摘要
+            activity_stats = self.get_activity_stats(db, user_id, days)
+            
+            # 计算最活跃的活动类型
+            most_active_type = "agent_chat"
+            if activity_stats.get("activity_by_type"):
+                most_active_type = max(activity_stats["activity_by_type"], 
+                                     key=activity_stats["activity_by_type"].get)
+            
+            # 构建最近活动统计
+            recent_activities = []
+            total_recent = sum(activity_stats.get("activity_by_type", {}).values())
+            
+            for activity_type, count in activity_stats.get("activity_by_type", {}).items():
+                percentage = (count / total_recent * 100) if total_recent > 0 else 0
+                recent_activities.append({
+                    "activity_type": activity_type,
+                    "count": count,
+                    "percentage": round(percentage, 1)
+                })
+            
+            # 按数量排序
+            recent_activities.sort(key=lambda x: x["count"], reverse=True)
+            
+            return {
+                "document_stats": {
+                    "total": total_doc_count,
+                    "growth_rate": round(doc_growth_rate, 3),
+                    "growth_count": current_doc_count
+                },
+                "knowledge_base_stats": {
+                    "total": total_kb_count,
+                    "growth_rate": round(kb_growth_rate, 3),
+                    "growth_count": current_kb_count
+                },
+                "conversation_stats": {
+                    "today": today_conversations,
+                    "growth_rate": round(conversation_growth_rate, 3),
+                    "yesterday": yesterday_conversations
+                },
+                "activity_summary": {
+                    "total_activities": activity_stats.get("total_activities", 0),
+                    "most_active_type": most_active_type,
+                    "recent_activities": recent_activities[:5]  # 只返回前5个
+                },
+                "period": period,
+                "last_updated": current_date
+            }
+            
+        except Exception as e:
+            logger.error(f"获取仪表板统计失败: {str(e)}")
+            # 返回默认值
+            return {
+                "document_stats": {"total": 0, "growth_rate": 0.0, "growth_count": 0},
+                "knowledge_base_stats": {"total": 0, "growth_rate": 0.0, "growth_count": 0},
+                "conversation_stats": {"today": 0, "growth_rate": 0.0, "yesterday": 0},
+                "activity_summary": {
+                    "total_activities": 0,
+                    "most_active_type": "agent_chat",
+                    "recent_activities": []
+                },
+                "period": period,
+                "last_updated": datetime.utcnow()
+            }
 
 # 创建全局实例
 activity_service = ActivityService()
