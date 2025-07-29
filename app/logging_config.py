@@ -84,6 +84,16 @@ def setup_logging(log_level: str = "INFO", log_dir: str = "./logs"):
     logging.getLogger("chromadb").setLevel(logging.WARNING)
     logging.getLogger("openai").setLevel(logging.WARNING)
     
+    # 抑制可能打印向量数据的第三方库日志
+    logging.getLogger("qdrant_client").setLevel(logging.WARNING)
+    logging.getLogger("qdrant").setLevel(logging.WARNING)
+    logging.getLogger("dashscope").setLevel(logging.WARNING)
+    logging.getLogger("langchain").setLevel(logging.WARNING)
+    logging.getLogger("langchain_core").setLevel(logging.WARNING)
+    logging.getLogger("langchain_community").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    
     # 确保核心模块日志级别正确设置
     logging.getLogger("app.core").setLevel(numeric_level)
     logging.getLogger("app.services").setLevel(numeric_level)

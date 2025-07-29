@@ -48,7 +48,10 @@ class QwenEmbeddings(Embeddings):
             if response.status_code == 200:
                 embeddings = []
                 for output in response.output['embeddings']:
-                    embeddings.append(output['embedding'])
+                    embedding = output['embedding']
+                    # 确保不打印向量数据
+                    embeddings.append(embedding)
+                # logger.debug(f"成功生成 {len(embeddings)} 个嵌入向量，每个维度: {len(embeddings[0]) if embeddings else 0}")
                 return embeddings
             else:
                 logger.error(f"通义千问嵌入API调用失败: {response.message}")

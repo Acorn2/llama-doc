@@ -158,6 +158,10 @@ class Document(Base):
     max_retries = Column(Integer, default=3)
     last_retry_time = Column(DateTime(timezone=True), nullable=True)
     
+    # 同步状态字段：用于知识库向量同步
+    # available(可同步), syncing(同步中), synced(已同步), sync_failed(同步失败)
+    sync_status = Column(String, default="available", nullable=False)
+    
     # 建立关系
     user = relationship("User", back_populates="documents")
     
@@ -168,6 +172,8 @@ class Document(Base):
             Index('idx_status_upload_time', 'status', 'upload_time'),
             Index('idx_status_retry', 'status', 'retry_count'),
             Index('idx_cos_object_key', 'cos_object_key'),  # 新增COS对象键索引
+            Index('idx_sync_status', 'sync_status'),  # 同步状态索引
+            Index('idx_status_sync_status', 'status', 'sync_status'),  # 复合索引
             Index('idx_storage_type', 'storage_type'),      # 新增存储类型索引
             Index('idx_file_type', 'file_type'),           # 新增文件类型索引
             Index('idx_user_upload_time', 'user_id', 'upload_time'),  # 用户文档索引
@@ -231,10 +237,16 @@ class KnowledgeBaseDocument(Base):
     document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
     add_time = Column(DateTime(timezone=True), server_default=func.now())
     
+    # 向量同步状态：pending(待同步), syncing(同步中), completed(已完成), failed(失败)
+    vector_sync_status = Column(String, default="pending", nullable=False)
+    vector_sync_time = Column(DateTime(timezone=True), nullable=True)
+    vector_sync_error = Column(Text, nullable=True)
+    
     # 根据数据库类型添加索引
     if DB_TYPE == "postgresql":
         __table_args__ = (
             Index('idx_kb_doc', 'kb_id', 'document_id'),
+            Index('idx_vector_sync_status', 'vector_sync_status'),
         )
 
 class KnowledgeBaseAccess(Base):
@@ -363,7 +375,6 @@ def get_db_session():
                 # PostgreSQL更详细的测试
                 db.execute(text("SELECT version()"))
             
-            logger.debug(f"数据库连接成功 (类型: {DB_TYPE})")
             return db
             
         except Exception as e:

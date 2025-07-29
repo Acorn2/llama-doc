@@ -23,7 +23,7 @@ class DocumentTaskProcessor:
     def __init__(self):
         self.processing: Set[str] = set()  # 正在处理的文档ID
         self.is_running = False
-        self.poll_interval = 10  # 轮询间隔（秒）
+        self.poll_interval = 2  # 轮询间隔（2秒，提高响应速度）
         self.retry_interval = 300  # 重试间隔（5分钟）
         
     async def start_polling(self):
@@ -179,6 +179,7 @@ class DocumentTaskProcessor:
                     
                     # 更新数据库状态
                     document.status = "completed"
+                    document.sync_status = "available"  # 设置为可同步状态
                     document.pages = result["metadata"]["pages"]
                     document.chunk_count = result["chunk_count"]
                     document.process_end_time = datetime.now()

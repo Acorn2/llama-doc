@@ -162,15 +162,17 @@ class DocumentCreate(DocumentBase):
 
 class DocumentInfo(BaseModel):
     """文档信息模型"""
-    id: str
+    document_id: str
     filename: str
     file_size: int
+    file_md5: str
     pages: int
     upload_time: datetime
     status: DocumentStatus
     file_type: Optional[FileType] = None
     chunk_count: Optional[int] = None
     retry_count: Optional[int] = None
+    max_retries: Optional[int] = None
 
 class DocumentStatusResponse(BaseModel):
     """文档状态响应"""
@@ -351,7 +353,6 @@ class KnowledgeBaseLikeResponse(BaseModel):
 
 class KnowledgeBaseAccessLogRequest(BaseModel):
     """知识库访问记录请求模型"""
-    kb_id: str = Field(..., description="知识库ID")
     access_type: str = Field(..., description="访问类型：view, chat")
     access_metadata: Optional[Dict[str, Any]] = Field(None, description="额外信息")
 

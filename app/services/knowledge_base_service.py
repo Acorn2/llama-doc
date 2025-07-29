@@ -117,6 +117,11 @@ class KnowledgeBaseManager:
             logger.error(f"文档状态不允许添加到知识库: {document.status}")
             raise ValueError(f"文档状态为 {document.status}，无法添加到知识库")
         
+        # 检查文档同步状态
+        if document.sync_status not in ["available", "synced"]:
+            logger.error(f"文档同步状态不允许添加到知识库: {document.sync_status}")
+            raise ValueError(f"文档同步状态为 {document.sync_status}，无法添加到知识库")
+        
         # 检查文档是否已经在知识库中
         existing = db.query(KnowledgeBaseDocument).filter(
             KnowledgeBaseDocument.kb_id == kb_id,
@@ -173,7 +178,8 @@ class KnowledgeBaseManager:
         kb_doc = KnowledgeBaseDocument(
             id=str(uuid.uuid4()),
             kb_id=kb_id,
-            document_id=document_id
+            document_id=document_id,
+            vector_sync_status="completed"  # 原有方法仍然立即同步向量
         )
         
         db.add(kb_doc)
@@ -185,6 +191,67 @@ class KnowledgeBaseManager:
         db.refresh(kb_doc)
         
         logger.info(f"成功添加文档到知识库: KB {kb_id}, 文档 {document_id}")
+        return kb_doc
+    
+    def add_document_to_kb_db_only(
+        self, 
+        db: Session, 
+        kb_id: str, 
+        document_id: str
+    ) -> Optional[KnowledgeBaseDocument]:
+        """
+        仅添加文档到知识库的数据库关联记录，不处理向量复制
+        向量复制将由定时任务处理
+        
+        Args:
+            db: 数据库会话
+            kb_id: 知识库ID
+            document_id: 文档ID
+            
+        Returns:
+            Optional[KnowledgeBaseDocument]: 关联记录对象，如果已存在则返回None
+        """
+        # 检查知识库是否存在
+        kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+        if not kb:
+            logger.error(f"知识库不存在: {kb_id}")
+            raise ValueError("知识库不存在")
+        
+        # 检查文档是否存在
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            logger.error(f"文档不存在: {document_id}")
+            raise ValueError("文档不存在")
+        
+        # 检查是否已经存在关联
+        existing = db.query(KnowledgeBaseDocument).filter(
+            KnowledgeBaseDocument.kb_id == kb_id,
+            KnowledgeBaseDocument.document_id == document_id
+        ).first()
+        
+        if existing:
+            logger.info(f"文档已在知识库中: KB {kb_id}, 文档 {document_id}")
+            return None
+        
+        # 创建关联记录，状态为pending等待定时任务处理
+        kb_doc = KnowledgeBaseDocument(
+            id=str(uuid.uuid4()),
+            kb_id=kb_id,
+            document_id=document_id,
+            vector_sync_status="pending"  # 新方法设置为pending，等待定时任务处理
+        )
+        
+        db.add(kb_doc)
+        
+        # 更新知识库文档计数
+        kb.document_count = db.query(KnowledgeBaseDocument).filter(
+            KnowledgeBaseDocument.kb_id == kb_id
+        ).count() + 1
+        
+        db.commit()
+        db.refresh(kb_doc)
+        
+        logger.info(f"成功添加文档到知识库数据库记录: KB {kb_id}, 文档 {document_id}")
         return kb_doc
     
     def remove_document_from_kb(
@@ -866,7 +933,7 @@ class KnowledgeBaseManager:
                 
                 kb_point = {
                     'id': kb_point_uuid,  # 使用UUID作为点ID
-                    'vector': embedding,
+                    'vector': embedding,  # 不打印向量数据
                     'payload': {
                         "chunk_id": kb_chunk_id,
                         "chunk_index": result.get("chunk_index", i),
@@ -882,6 +949,9 @@ class KnowledgeBaseManager:
                     }
                 }
                 kb_points.append(kb_point)
+                
+                # 只记录向量维度，不打印具体数值
+                # logger.debug(f"准备向量点 {i+1}: 维度={len(embedding)}, 内容长度={len(content)}")
             
             # 添加到知识库集合
             if kb_points:

@@ -6,7 +6,7 @@ import uuid
 import time
 import logging
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 
@@ -36,10 +36,11 @@ router = APIRouter(
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
+    kb_id: Optional[str] = None,  # 可选的知识库ID
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """上传PDF文档 - 支持重复检测和腾讯云COS存储"""
+    """上传PDF文档 - 支持重复检测、腾讯云COS存储和自动添加到知识库"""
     
     # 先读取文件内容，验证文件类型和大小
     file_content = await file.read()
@@ -144,13 +145,47 @@ async def upload_document(
             storage_info = "腾讯云COS" if storage_result["storage_type"] == "cos" else "本地存储"
             logger.info(f"新文档上传成功({storage_info})，类型: {file_type.value}，等待处理: {document_id}")
             
+            # 如果指定了知识库ID，自动添加到知识库
+            kb_message = ""
+            if kb_id:
+                try:
+                    from app.database import KnowledgeBase
+                    from app.services.knowledge_base_service import KnowledgeBaseManager
+                    
+                    # 验证知识库权限
+                    kb = db.query(KnowledgeBase).filter(
+                        KnowledgeBase.id == kb_id,
+                        KnowledgeBase.user_id == current_user.id
+                    ).first()
+                    
+                    if kb:
+                        kb_manager = KnowledgeBaseManager()
+                        kb_doc = kb_manager.add_document_to_kb_db_only(
+                            db=db,
+                            kb_id=kb_id,
+                            document_id=document_id
+                        )
+                        
+                        if kb_doc:
+                            kb_message = f"，已添加到知识库 '{kb.name}'"
+                            logger.info(f"文档 {document_id} 已自动添加到知识库 {kb_id}")
+                        else:
+                            kb_message = f"，已在知识库 '{kb.name}' 中"
+                    else:
+                        logger.warning(f"知识库 {kb_id} 不存在或无权限，跳过自动添加")
+                        kb_message = "，知识库添加失败（权限不足）"
+                        
+                except Exception as kb_error:
+                    logger.error(f"自动添加到知识库失败: {str(kb_error)}")
+                    kb_message = "，知识库添加失败"
+            
             return DocumentUploadResponse(
                 document_id=document_id,
                 filename=file.filename,
                 status=TaskStatus.PENDING,
                 upload_time=datetime.now(),
                 file_type=file_type,
-                message=f"文档上传成功({storage_info})，正在等待处理..."
+                message=f"文档上传成功({storage_info})，正在等待处理{kb_message}..."
             )
         except Exception as db_error:
             # 回滚事务
