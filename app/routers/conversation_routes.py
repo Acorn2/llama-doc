@@ -433,16 +433,20 @@ async def chat_stream(
             conversation_id = conversation.id
         
         # 保存用户消息
-        conversation_manager.add_message(
-            db=db,
-            conversation_id=conversation_id,
-            role="user",
-            content=request.message,
-            user_id=current_user.id
-        )
+        # conversation_manager.add_message(
+        #     db=db,
+        #     conversation_id=conversation_id,
+        #     role="user",
+        #     content=request.message,
+        #     user_id=current_user.id
+        # )
         
         # 生成流式回复
         use_agent = getattr(request, 'use_agent', False)
+        
+        # 导入打字机效果工具类
+        from app.utils.streaming_utils import StreamingResponseBuilder, StreamingPresets
+        
         if use_agent:
             # 使用Agent生成流式回复
             adapter = get_langchain_adapter()
@@ -452,37 +456,42 @@ async def chat_stream(
                 conversation_id=conversation_id
             )
             
-            # Agent模式暂时不支持流式，返回完整回复
-            def generate_agent_stream():
+            # 使用打字机效果输出Agent回复（这里仍然是伪流式，因为Agent暂不支持真流式）
+            async def generate_agent_stream():
+                # 根据回复长度选择合适的预设
                 answer = response["answer"]
-                # 将完整回复分块发送
-                chunk_size = 50
-                for i in range(0, len(answer), chunk_size):
-                    chunk = answer[i:i+chunk_size]
-                    chunk_data = ChatStreamChunk(
-                        conversation_id=conversation_id,
-                        content=chunk,
-                        is_final=False
-                    )
-                    yield f"data: {chunk_data.model_dump_json()}\n\n"
-                    time.sleep(0.05)  # 模拟流式延迟
+                response_length = len(answer)
                 
-                # 发送最终块
-                final_chunk = ChatStreamChunk(
+                if response_length < 100:
+                    preset = StreamingPresets.FAST_NATURAL
+                elif response_length < 500:
+                    preset = StreamingPresets.NATURAL
+                else:
+                    preset = StreamingPresets.STANDARD
+                
+                # 创建流式响应
+                stream_generator = StreamingResponseBuilder.create_conversation_stream(
+                    response_text=answer,
                     conversation_id=conversation_id,
-                    content="",
-                    is_final=True,
-                    processing_time=time.time() - start_time
+                    sources=response.get("sources", []),
+                    processing_time=time.time() - start_time,
+                    typewriter_config=preset
                 )
-                yield f"data: {final_chunk.model_dump_json()}\n\n"
+                
+                async for chunk in stream_generator:
+                    yield chunk
             
             return StreamingResponse(
                 generate_agent_stream(),
                 media_type="text/plain",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+                headers={
+                    "Cache-Control": "no-cache", 
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
             )
         else:
-            # 使用对话管理器生成流式回复
+            # 使用对话管理器生成真正的流式回复
             adapter = get_langchain_adapter()
             result = conversation_manager.generate_response(
                 db=db,
@@ -493,31 +502,41 @@ async def chat_stream(
                 user_id=current_user.id
             )
             
-            def generate_stream():
-                for chunk_data in result["stream"]:
-                    if chunk_data["is_final"]:
-                        # 最终块
-                        final_chunk = ChatStreamChunk(
-                            conversation_id=conversation_id,
-                            content="",
-                            is_final=True,
-                            sources=chunk_data.get("sources", []),
-                            processing_time=chunk_data.get("processing_time", 0)
-                        )
-                        yield f"data: {final_chunk.model_dump_json()}\n\n"
-                    else:
-                        # 内容块
-                        chunk = ChatStreamChunk(
-                            conversation_id=conversation_id,
-                            content=chunk_data["chunk"],
-                            is_final=False
-                        )
-                        yield f"data: {chunk.model_dump_json()}\n\n"
+            # 真正的流式处理
+            async def generate_realtime_stream():
+                # 根据消息长度选择预设
+                message_length = len(request.message)
+                if message_length < 50:
+                    preset = StreamingPresets.FAST_NATURAL
+                elif message_length < 200:
+                    preset = StreamingPresets.NATURAL
+                else:
+                    preset = StreamingPresets.STANDARD
+                
+                # 创建真正的实时流式响应
+                metadata = {
+                    "conversation_id": conversation_id,
+                    "user_message_length": message_length
+                }
+                
+                stream_generator = StreamingResponseBuilder.create_realtime_stream(
+                    llm_stream_generator=result["stream"],
+                    conversation_id=conversation_id,
+                    metadata=metadata,
+                    typewriter_config=preset
+                )
+                
+                async for chunk in stream_generator:
+                    yield chunk
             
             return StreamingResponse(
-                generate_stream(),
+                generate_realtime_stream(),
                 media_type="text/plain",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+                headers={
+                    "Cache-Control": "no-cache", 
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/plain; charset=utf-8"
+                }
             )
         
     except ValueError as e:

@@ -239,22 +239,23 @@ async def get_agent_status(
 @handle_service_exceptions
 async def agent_chat_stream(
     request: AgentChatRequest,
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    current_user: User = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     Agent流式对话接口
-    支持实时流式输出
+    支持打字机效果的实时流式输出
     """
+    from app.utils.streaming_utils import StreamingResponseBuilder, StreamingPresets
     import json
     import time
     
     start_time = time.time()
     
-    # 这里需要修改AgentService以支持流式输出
-    # 目前先返回模拟的流式响应
     async def generate_stream():
         try:
-            # 调用非流式Agent服务获取完整回复
+            # 调用Agent服务获取完整回复
             result = await agent_service.chat_with_agent(
                 kb_id=request.kb_id,
                 message=request.message,
@@ -263,49 +264,85 @@ async def agent_chat_stream(
                 llm_type=request.llm_type
             )
             
+            # 记录Agent对话活动
+            from app.utils.activity_logger import log_user_activity
+            from app.schemas import ActivityType
+            log_user_activity(
+                db=db,
+                user=current_user,
+                activity_type=ActivityType.AGENT_CHAT,
+                description=f"Agent流式对话: {request.message[:50]}...",
+                resource_type="knowledge_base",
+                resource_id=request.kb_id,
+                metadata={
+                    "message_length": len(request.message),
+                    "use_agent": request.use_agent,
+                    "llm_type": request.llm_type,
+                    "streaming": True
+                }
+            )
+            
             if result["success"]:
-                answer = result["data"]["answer"]
-                # 将完整回复分块发送
-                chunk_size = 50
-                for i in range(0, len(answer), chunk_size):
-                    chunk = answer[i:i+chunk_size]
-                    chunk_data = ChatStreamChunk(
-                        conversation_id=request.conversation_id or "new",
-                        content=chunk,
-                        is_final=False
-                    )
-                    yield f"data: {chunk_data.model_dump_json()}\n\n"
-                    time.sleep(0.05)  # 模拟流式延迟
+                response_data = result["data"]
                 
-                # 发送最终块
-                final_chunk = ChatStreamChunk(
-                    conversation_id=request.conversation_id or "new",
-                    content="",
-                    is_final=True,
-                    processing_time=time.time() - start_time
+                # 根据消息长度和内容选择合适的打字机预设
+                message_length = len(request.message)
+                response_length = len(response_data.get("answer", ""))
+                
+                if response_length < 100:
+                    preset = StreamingPresets.FAST_NATURAL
+                elif response_length < 500:
+                    preset = StreamingPresets.NATURAL
+                else:
+                    preset = StreamingPresets.STANDARD
+                
+                # 使用打字机效果流式输出
+                stream_generator = StreamingResponseBuilder.create_agent_stream(
+                    response_data=response_data,
+                    kb_id=request.kb_id,
+                    use_agent=request.use_agent,
+                    typewriter_config=preset
                 )
-                yield f"data: {final_chunk.model_dump_json()}\n\n"
+                
+                async for chunk in stream_generator:
+                    yield chunk
+                    
             else:
-                # 错误情况
-                error_chunk = ChatStreamChunk(
-                    conversation_id=request.conversation_id or "new",
-                    content="抱歉，处理您的请求时发生了错误。",
-                    is_final=True,
-                    processing_time=time.time() - start_time
+                # 错误情况 - 使用打字机效果输出错误信息
+                error_message = "抱歉，处理您的请求时发生了错误。"
+                error_data = {"answer": error_message, "error": True}
+                
+                stream_generator = StreamingResponseBuilder.create_agent_stream(
+                    response_data=error_data,
+                    kb_id=request.kb_id,
+                    use_agent=request.use_agent,
+                    typewriter_config=StreamingPresets.FAST_NATURAL
                 )
-                yield f"data: {error_chunk.model_dump_json()}\n\n"
+                
+                async for chunk in stream_generator:
+                    yield chunk
                 
         except Exception as e:
-            error_chunk = ChatStreamChunk(
-                conversation_id=request.conversation_id or "new",
-                content=f"处理请求时发生错误: {str(e)}",
-                is_final=True,
-                processing_time=time.time() - start_time
+            # 异常情况 - 使用打字机效果输出异常信息
+            error_message = f"处理请求时发生错误: {str(e)}"
+            error_data = {"answer": error_message, "error": True}
+            
+            stream_generator = StreamingResponseBuilder.create_agent_stream(
+                response_data=error_data,
+                kb_id=request.kb_id,
+                use_agent=request.use_agent,
+                typewriter_config=StreamingPresets.FAST_NATURAL
             )
-            yield f"data: {error_chunk.model_dump_json()}\n\n"
+            
+            async for chunk in stream_generator:
+                yield chunk
     
     return StreamingResponse(
         generate_stream(),
         media_type="text/plain",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={
+            "Cache-Control": "no-cache", 
+            "Connection": "keep-alive",
+            "Content-Type": "text/plain; charset=utf-8"
+        }
     )
