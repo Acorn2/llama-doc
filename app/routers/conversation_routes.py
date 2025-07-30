@@ -53,6 +53,7 @@ def get_langchain_adapter():
 @router.post("/", response_model=ConversationResponse)
 async def create_conversation(
     request: ConversationCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """创建新对话"""
@@ -60,6 +61,7 @@ async def create_conversation(
         conversation = conversation_manager.create_conversation(
             db=db,
             kb_id=request.kb_id,
+            user_id=current_user.id,
             title=request.title
         )
         
@@ -93,12 +95,14 @@ async def list_conversations(
     skip: int = 0,
     limit: int = 10,
     status: str = "active",
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """列出所有对话"""
     try:
         result = conversation_manager.list_conversations(
             db=db,
+            user_id=current_user.id,
             kb_id=kb_id,
             skip=skip,
             limit=limit,
@@ -137,10 +141,11 @@ async def list_conversations(
 @router.get("/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(
     conversation_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取对话详情"""
-    conversation = conversation_manager.get_conversation(db, conversation_id)
+    conversation = conversation_manager.get_conversation(db, conversation_id, current_user.id)
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
     
@@ -166,12 +171,14 @@ async def get_conversation(
 async def update_conversation(
     conversation_id: str,
     title: str = Query(..., description="对话标题"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """更新对话"""
     conversation = conversation_manager.update_conversation(
         db=db,
         conversation_id=conversation_id,
+        user_id=current_user.id,
         title=title
     )
     
@@ -199,10 +206,11 @@ async def update_conversation(
 @router.delete("/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """删除对话（逻辑删除）"""
-    success = conversation_manager.delete_conversation(db, conversation_id)
+    success = conversation_manager.delete_conversation(db, conversation_id, current_user.id)
     
     if not success:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -213,6 +221,7 @@ async def delete_conversation(
 async def get_conversation_messages(
     conversation_id: str,
     limit: int = 20,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取对话历史消息"""
@@ -220,7 +229,8 @@ async def get_conversation_messages(
         messages = conversation_manager.get_conversation_history(
             db=db,
             conversation_id=conversation_id,
-            limit=limit
+            limit=limit,
+            user_id=current_user.id
         )
         
         # 格式化输出
@@ -255,6 +265,7 @@ async def get_conversation_messages(
 async def add_message(
     conversation_id: str,
     request: MessageCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """添加消息到对话"""
@@ -264,7 +275,8 @@ async def add_message(
             conversation_id=conversation_id,
             role=request.role,
             content=request.content,
-            metadata=request.metadata
+            metadata=request.metadata,
+            user_id=current_user.id
         )
         
         return message
@@ -278,6 +290,7 @@ async def add_message(
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """聊天接口 - 创建或继续对话"""
@@ -290,6 +303,7 @@ async def chat(
             conversation = conversation_manager.create_conversation(
                 db=db,
                 kb_id=request.kb_id,
+                user_id=current_user.id,
                 title=None  # 使用默认标题
             )
             conversation_id = conversation.id
@@ -310,7 +324,8 @@ async def chat(
                 db=db,
                 conversation_id=conversation_id,
                 role="user",
-                content=request.message
+                content=request.message,
+                user_id=current_user.id
             )
             
             message = conversation_manager.add_message(
@@ -318,7 +333,8 @@ async def chat(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=response["answer"],
-                metadata={"agent_used": True}
+                metadata={"agent_used": True},
+                user_id=current_user.id
             )
             
             sources = []
@@ -329,7 +345,8 @@ async def chat(
                 db=db,
                 conversation_id=conversation_id,
                 user_message=request.message,
-                langchain_adapter=adapter
+                langchain_adapter=adapter,
+                user_id=current_user.id
             )
             
             message = result["message"]
@@ -374,6 +391,7 @@ async def chat_in_conversation(
     conversation_id: str,
     message: str = Query(..., description="用户消息"),
     use_agent: bool = Query(False, description="是否使用Agent模式"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """在指定对话中聊天"""
@@ -391,11 +409,12 @@ async def chat_in_conversation(
     )
     
     # 调用聊天接口
-    return await chat(request, db)
+    return await chat(request, current_user, db)
 
 @router.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """流式聊天接口 - 创建或继续对话"""
@@ -408,6 +427,7 @@ async def chat_stream(
             conversation = conversation_manager.create_conversation(
                 db=db,
                 kb_id=request.kb_id,
+                user_id=current_user.id,
                 title=None  # 使用默认标题
             )
             conversation_id = conversation.id
@@ -417,7 +437,8 @@ async def chat_stream(
             db=db,
             conversation_id=conversation_id,
             role="user",
-            content=request.message
+            content=request.message,
+            user_id=current_user.id
         )
         
         # 生成流式回复
@@ -468,7 +489,8 @@ async def chat_stream(
                 conversation_id=conversation_id,
                 user_message=request.message,
                 langchain_adapter=adapter,
-                stream=True
+                stream=True,
+                user_id=current_user.id
             )
             
             def generate_stream():
@@ -510,6 +532,7 @@ async def chat_in_conversation_stream(
     conversation_id: str,
     message: str = Query(..., description="用户消息"),
     use_agent: bool = Query(False, description="是否使用Agent模式"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """在指定对话中进行流式聊天"""
@@ -527,4 +550,4 @@ async def chat_in_conversation_stream(
     )
     
     # 调用流式聊天接口
-    return await chat_stream(request, db) 
+    return await chat_stream(request, current_user, db) 

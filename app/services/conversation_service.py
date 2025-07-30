@@ -88,7 +88,8 @@ class ConversationManager:
         conversation_id: str, 
         role: str, 
         content: str, 
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None
     ) -> Message:
         """
         添加消息到对话
@@ -99,6 +100,7 @@ class ConversationManager:
             role: 消息角色 (user, assistant, system)
             content: 消息内容
             metadata: 消息元数据，可选
+            user_id: 用户ID，用于权限检查
             
         Returns:
             Message: 创建的消息对象
@@ -108,6 +110,11 @@ class ConversationManager:
         if not conversation:
             logger.error(f"对话不存在: {conversation_id}")
             raise ValueError("对话不存在")
+        
+        # 检查用户权限（如果提供了user_id）
+        if user_id and conversation.user_id != user_id:
+            logger.error(f"用户 {user_id} 无权限访问对话 {conversation_id}")
+            raise ValueError("无权限访问该对话")
         
         # 检查角色是否有效
         valid_roles = ["user", "assistant", "system"]
@@ -162,7 +169,8 @@ class ConversationManager:
         self, 
         db: Session, 
         conversation_id: str, 
-        limit: int = 20
+        limit: int = 20,
+        user_id: Optional[str] = None
     ) -> List[Message]:
         """
         获取对话历史
@@ -171,6 +179,7 @@ class ConversationManager:
             db: 数据库会话
             conversation_id: 对话ID
             limit: 返回消息数量限制
+            user_id: 用户ID，用于权限检查
             
         Returns:
             List[Message]: 消息对象列表
@@ -180,6 +189,11 @@ class ConversationManager:
         if not conversation:
             logger.error(f"对话不存在: {conversation_id}")
             raise ValueError("对话不存在")
+        
+        # 检查用户权限（如果提供了user_id）
+        if user_id and conversation.user_id != user_id:
+            logger.error(f"用户 {user_id} 无权限访问对话 {conversation_id}")
+            raise ValueError("无权限访问该对话")
         
         # 查询消息历史，使用序号排序
         messages = db.query(Message).filter(
@@ -194,7 +208,8 @@ class ConversationManager:
         self, 
         db: Session, 
         conversation_id: str, 
-        message_limit: int = 10
+        message_limit: int = 10,
+        user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         获取对话上下文（用于生成下一个回复）
@@ -212,7 +227,7 @@ class ConversationManager:
             return self.memory_store[conversation_id][-message_limit:]
         
         # 从数据库加载
-        messages = self.get_conversation_history(db, conversation_id, message_limit)
+        messages = self.get_conversation_history(db, conversation_id, message_limit, user_id)
         
         # 转换为LangChain兼容格式
         context = []
@@ -242,7 +257,8 @@ class ConversationManager:
         conversation_id: str, 
         user_message: str,
         langchain_adapter=None,
-        stream: bool = False
+        stream: bool = False,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         生成助手回复
@@ -269,7 +285,7 @@ class ConversationManager:
         kb_id = conversation.kb_id
         
         # 保存用户消息
-        self.add_message(db, conversation_id, "user", user_message)
+        self.add_message(db, conversation_id, "user", user_message, user_id=user_id)
         
         # 从知识库检索相关内容
         search_results = self.kb_manager.search_knowledge_base(
@@ -280,7 +296,7 @@ class ConversationManager:
         )
         
         # 构建上下文
-        context = self.get_conversation_context(db, conversation_id)
+        context = self.get_conversation_context(db, conversation_id, user_id=user_id)
         
         # 如果提供了LangChain适配器，使用适配器生成回复
         if langchain_adapter:
@@ -313,7 +329,7 @@ class ConversationManager:
                         "sources": sources,
                         "processing_time": processing_time
                     }
-                    message = self.add_message(db, conversation_id, "assistant", full_answer, metadata)
+                    message = self.add_message(db, conversation_id, "assistant", full_answer, metadata, user_id=user_id)
                     
                     # 发送最终块
                     yield {
@@ -366,7 +382,7 @@ class ConversationManager:
                         "sources": sources,
                         "processing_time": processing_time
                     }
-                    message = self.add_message(db, conversation_id, "assistant", answer, metadata)
+                    message = self.add_message(db, conversation_id, "assistant", answer, metadata, user_id=user_id)
                     
                     # 发送最终块
                     yield {
@@ -404,7 +420,7 @@ class ConversationManager:
             }
             
             # 保存助手回复
-            message = self.add_message(db, conversation_id, "assistant", answer, metadata)
+            message = self.add_message(db, conversation_id, "assistant", answer, metadata, user_id=user_id)
             
             return {
                 "message": message,
@@ -460,16 +476,18 @@ class ConversationManager:
     def list_conversations(
         self, 
         db: Session, 
+        user_id: str,
         kb_id: Optional[str] = None,
         skip: int = 0,
         limit: int = 10,
         status: str = "active"
     ) -> Dict[str, Any]:
         """
-        列出所有对话
+        列出用户的对话
         
         Args:
             db: 数据库会话
+            user_id: 用户ID
             kb_id: 知识库ID过滤，可选
             skip: 跳过记录数
             limit: 返回记录数
@@ -478,7 +496,7 @@ class ConversationManager:
         Returns:
             Dict[str, Any]: 包含对话列表和总数的字典
         """
-        query = db.query(Conversation)
+        query = db.query(Conversation).filter(Conversation.user_id == user_id)
         
         if kb_id:
             query = query.filter(Conversation.kb_id == kb_id)
@@ -494,23 +512,32 @@ class ConversationManager:
             "total": total
         }
     
-    def get_conversation(self, db: Session, conversation_id: str) -> Optional[Conversation]:
+    def get_conversation(self, db: Session, conversation_id: str, user_id: Optional[str] = None) -> Optional[Conversation]:
         """
         获取对话详情
         
         Args:
             db: 数据库会话
             conversation_id: 对话ID
+            user_id: 用户ID，用于权限检查
             
         Returns:
             Conversation: 对话对象
         """
-        return db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        
+        # 检查用户权限（如果提供了user_id）
+        if conversation and user_id and conversation.user_id != user_id:
+            logger.error(f"用户 {user_id} 无权限访问对话 {conversation_id}")
+            return None
+            
+        return conversation
     
     def update_conversation(
         self, 
         db: Session, 
         conversation_id: str, 
+        user_id: str,
         title: Optional[str] = None,
         status: Optional[str] = None
     ) -> Optional[Conversation]:
@@ -520,15 +547,19 @@ class ConversationManager:
         Args:
             db: 数据库会话
             conversation_id: 对话ID
+            user_id: 用户ID
             title: 新标题，可选
             status: 新状态，可选
             
         Returns:
             Conversation: 更新后的对话对象
         """
-        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        conversation = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id
+        ).first()
         if not conversation:
-            logger.error(f"对话不存在: {conversation_id}")
+            logger.error(f"对话不存在或无权限: {conversation_id}")
             return None
         
         if title is not None:
@@ -542,20 +573,24 @@ class ConversationManager:
         
         return conversation
     
-    def delete_conversation(self, db: Session, conversation_id: str) -> bool:
+    def delete_conversation(self, db: Session, conversation_id: str, user_id: str) -> bool:
         """
         删除对话（逻辑删除）
         
         Args:
             db: 数据库会话
             conversation_id: 对话ID
+            user_id: 用户ID
             
         Returns:
             bool: 操作是否成功
         """
-        conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        conversation = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id
+        ).first()
         if not conversation:
-            logger.error(f"对话不存在: {conversation_id}")
+            logger.error(f"对话不存在或无权限: {conversation_id}")
             return False
         
         # 逻辑删除
