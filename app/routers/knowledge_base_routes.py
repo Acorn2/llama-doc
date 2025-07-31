@@ -302,6 +302,58 @@ async def update_knowledge_base(
         logger.error(f"更新知识库失败: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+@router.delete("/{kb_id}")
+async def delete_knowledge_base(
+    kb_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """删除知识库"""
+    try:
+        # 检查知识库是否存在且用户有权限
+        kb = db.query(KnowledgeBase).filter(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.user_id == current_user.id
+        ).first()
+        if not kb:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权限访问")
+        
+        # 执行删除
+        success = kb_manager.delete_knowledge_base(db=db, kb_id=kb_id)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="删除知识库失败")
+        
+        # 记录删除活动
+        from app.utils.activity_logger import log_user_activity
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.KB_DELETE,
+            description=f"删除知识库: {kb.name}",
+            request=request,
+            resource_type="knowledge_base",
+            resource_id=kb_id,
+            metadata={
+                "kb_name": kb.name,
+                "document_count": kb.document_count
+            }
+        )
+        
+        return {
+            "success": True,
+            "message": "知识库删除成功",
+            "data": {
+                "kb_id": kb_id,
+                "kb_name": kb.name
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除知识库失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="删除知识库失败")
+
 @router.post("/{kb_id}/like", response_model=KnowledgeBaseLikeResponse)
 async def toggle_knowledge_base_like(
     kb_id: str,

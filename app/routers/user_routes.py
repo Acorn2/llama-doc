@@ -228,28 +228,20 @@ async def get_user_activity_stats(
 
 @router.get("/dashboard/stats")
 async def get_dashboard_stats(
-    period: str = "30d",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取用户仪表板统计数据"""
     try:
         from app.services.activity_service import activity_service
-        from app.schemas import DashboardStatsResponse, DashboardStatsData
         
-        # 验证period参数
-        if period not in ["7d", "30d", "90d"]:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的统计周期")
-        
-        stats_data = activity_service.get_dashboard_stats(db, current_user.id, period)
+        stats_data = activity_service.get_dashboard_stats(db, current_user.id)
         
         return {
             "success": True,
             "data": stats_data,
             "message": "获取仪表板统计成功"
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取仪表板统计失败: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取仪表板统计失败")
