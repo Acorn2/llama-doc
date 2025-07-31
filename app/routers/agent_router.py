@@ -38,6 +38,7 @@ async def agent_chat(
     支持Agent模式和普通对话模式
     """
     result = await agent_service.chat_with_agent(
+        db=db,
         kb_id=request_data.kb_id,
         message=request_data.message,
         conversation_id=request_data.conversation_id,
@@ -45,23 +46,7 @@ async def agent_chat(
         llm_type=request_data.llm_type
     )
     
-    # 记录Agent对话活动
-    from app.utils.activity_logger import log_user_activity
-    from app.schemas import ActivityType
-    log_user_activity(
-        db=db,
-        user=current_user,
-        activity_type=ActivityType.AGENT_CHAT,
-        description=f"Agent对话: {request_data.message[:50]}...",
-        request=request,
-        resource_type="knowledge_base",
-        resource_id=request_data.kb_id,
-        metadata={
-            "message_length": len(request_data.message),
-            "use_agent": request_data.use_agent,
-            "llm_type": request_data.llm_type
-        }
-    )
+
     
     return result
 
@@ -78,27 +63,13 @@ async def analyze_document(
     使用Agent分析文档内容
     """
     result = await agent_service.analyze_document(
+        db=db,
         kb_id=request_data.kb_id,
         query=request_data.query,
         llm_type=request_data.llm_type
     )
     
-    # 记录Agent分析活动
-    from app.utils.activity_logger import log_user_activity
-    from app.schemas import ActivityType
-    log_user_activity(
-        db=db,
-        user=current_user,
-        activity_type=ActivityType.AGENT_ANALYZE,
-        description=f"Agent文档分析: {request_data.query[:50]}...",
-        request=request,
-        resource_type="knowledge_base",
-        resource_id=request_data.kb_id,
-        metadata={
-            "query": request_data.query,
-            "llm_type": request_data.llm_type
-        }
-    )
+
     
     return result
 
@@ -115,29 +86,14 @@ async def search_knowledge(
     在知识库中搜索信息
     """
     result = await agent_service.search_knowledge(
+        db=db,
         kb_id=request_data.kb_id,
         query=request_data.query,
         max_results=request_data.max_results,
         llm_type=request_data.llm_type
     )
     
-    # 记录Agent搜索活动
-    from app.utils.activity_logger import log_user_activity
-    from app.schemas import ActivityType
-    log_user_activity(
-        db=db,
-        user=current_user,
-        activity_type=ActivityType.AGENT_SEARCH,
-        description=f"Agent知识搜索: {request_data.query[:50]}...",
-        request=request,
-        resource_type="knowledge_base",
-        resource_id=request_data.kb_id,
-        metadata={
-            "query": request_data.query,
-            "max_results": request_data.max_results,
-            "llm_type": request_data.llm_type
-        }
-    )
+
     
     return result
 
@@ -154,25 +110,12 @@ async def generate_summary(
     生成文档摘要
     """
     result = await agent_service.generate_summary(
+        db=db,
         kb_id=request_data.kb_id,
         llm_type=request_data.llm_type
     )
     
-    # 记录Agent摘要生成活动
-    from app.utils.activity_logger import log_user_activity
-    from app.schemas import ActivityType
-    log_user_activity(
-        db=db,
-        user=current_user,
-        activity_type=ActivityType.AGENT_SUMMARY,
-        description="Agent生成文档摘要",
-        request=request,
-        resource_type="knowledge_base",
-        resource_id=request_data.kb_id,
-        metadata={
-            "llm_type": request_data.llm_type
-        }
-    )
+
     
     return result
 
@@ -181,12 +124,14 @@ async def generate_summary(
 async def get_conversation_history(
     kb_id: str, 
     llm_type: str = "qwen",
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     获取Agent对话历史
     """
     result = await agent_service.get_conversation_history(
+        db=db,
         kb_id=kb_id,
         llm_type=llm_type
     )
@@ -197,12 +142,14 @@ async def get_conversation_history(
 async def clear_agent_memory(
     kb_id: str, 
     llm_type: str = "qwen",
-    agent_service: AgentService = Depends(get_agent_service_dep)
+    agent_service: AgentService = Depends(get_agent_service_dep),
+    db: Session = Depends(get_db)
 ):
     """
     清除Agent对话记忆
     """
     result = await agent_service.clear_agent_memory(
+        db=db,
         kb_id=kb_id,
         llm_type=llm_type
     )
@@ -257,6 +204,7 @@ async def agent_chat_stream(
         try:
             # 调用Agent服务获取完整回复
             result = await agent_service.chat_with_agent(
+                db=db,
                 kb_id=request.kb_id,
                 message=request.message,
                 conversation_id=request.conversation_id,
@@ -264,23 +212,7 @@ async def agent_chat_stream(
                 llm_type=request.llm_type
             )
             
-            # 记录Agent对话活动
-            from app.utils.activity_logger import log_user_activity
-            from app.schemas import ActivityType
-            log_user_activity(
-                db=db,
-                user=current_user,
-                activity_type=ActivityType.AGENT_CHAT,
-                description=f"Agent流式对话: {request.message[:50]}...",
-                resource_type="knowledge_base",
-                resource_id=request.kb_id,
-                metadata={
-                    "message_length": len(request.message),
-                    "use_agent": request.use_agent,
-                    "llm_type": request.llm_type,
-                    "streaming": True
-                }
-            )
+
             
             if result["success"]:
                 response_data = result["data"]

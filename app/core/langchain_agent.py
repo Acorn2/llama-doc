@@ -28,11 +28,11 @@ class DocumentAnalysisTool(BaseTool):
     
     name: str = "document_analyzer"
     description: str = "分析文档内容，提取关键信息、总结要点或回答特定问题"
+    adapter: Any = None  # 声明adapter字段
+    kb_id: str = ""      # 声明kb_id字段
     
     def __init__(self, langchain_adapter: LangChainAdapter, kb_id: str):
-        super().__init__()
-        self.adapter = langchain_adapter
-        self.kb_id = kb_id
+        super().__init__(adapter=langchain_adapter, kb_id=kb_id)
     
     def _run(self, query: str) -> str:
         """执行文档分析"""
@@ -73,11 +73,11 @@ class KnowledgeSearchTool(BaseTool):
     
     name: str = "knowledge_search"
     description: str = "在知识库中搜索特定信息，支持语义搜索和关键词搜索"
+    adapter: Any = None  # 声明adapter字段
+    kb_id: str = ""      # 声明kb_id字段
     
     def __init__(self, langchain_adapter: LangChainAdapter, kb_id: str):
-        super().__init__()
-        self.adapter = langchain_adapter
-        self.kb_id = kb_id
+        super().__init__(adapter=langchain_adapter, kb_id=kb_id)
     
     def _run(self, query: str) -> str:
         """执行知识搜索"""
@@ -104,11 +104,11 @@ class SummaryTool(BaseTool):
     
     name: str = "document_summary"
     description: str = "生成文档摘要，提取核心观点和关键信息"
+    adapter: Any = None  # 声明adapter字段
+    kb_id: str = ""      # 声明kb_id字段
     
     def __init__(self, langchain_adapter: LangChainAdapter, kb_id: str):
-        super().__init__()
-        self.adapter = langchain_adapter
-        self.kb_id = kb_id
+        super().__init__(adapter=langchain_adapter, kb_id=kb_id)
     
     def _run(self, query: str = "生成文档摘要") -> str:
         """生成文档摘要"""

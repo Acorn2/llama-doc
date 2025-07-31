@@ -204,22 +204,7 @@ async def get_knowledge_base(
         if kb.user_id != current_user.id and not kb.is_public:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问此知识库")
         
-        # 记录知识库查看活动
-        from app.utils.activity_logger import log_user_activity
-        log_user_activity(
-            db=db,
-            user=current_user,
-            activity_type=ActivityType.KB_VIEW,
-            description=f"查看知识库详情: {kb.name}",
-            request=request,
-            resource_type="knowledge_base",
-            resource_id=kb_id,
-            metadata={
-                "kb_name": kb.name,
-                "is_public": kb.is_public,
-                "document_count": kb.document_count
-            }
-        )
+
         
         # 解析标签
         tags = []
@@ -324,21 +309,7 @@ async def delete_knowledge_base(
         if not success:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="删除知识库失败")
         
-        # 记录删除活动
-        from app.utils.activity_logger import log_user_activity
-        log_user_activity(
-            db=db,
-            user=current_user,
-            activity_type=ActivityType.KB_DELETE,
-            description=f"删除知识库: {kb.name}",
-            request=request,
-            resource_type="knowledge_base",
-            resource_id=kb_id,
-            metadata={
-                "kb_name": kb.name,
-                "document_count": kb.document_count
-            }
-        )
+
         
         return {
             "success": True,
@@ -418,21 +389,7 @@ async def list_knowledge_base_documents(
         # 获取知识库中的文档列表
         documents = kb_manager.list_kb_documents(db=db, kb_id=kb_id)
         
-        # 记录知识库访问活动
-        from app.utils.activity_logger import log_user_activity
-        log_user_activity(
-            db=db,
-            user=current_user,
-            activity_type=ActivityType.KB_VIEW,
-            description=f"查看知识库文档列表: {kb.name}",
-            request=request,
-            resource_type="knowledge_base",
-            resource_id=kb_id,
-            metadata={
-                "kb_name": kb.name,
-                "document_count": len(documents)
-            }
-        )
+
         
         # 转换为响应格式
         document_responses = []

@@ -38,17 +38,7 @@ async def register_user(
     try:
         user = user_service.create_user(db, user_data)
         
-        # 记录用户注册活动
-        from app.utils.activity_logger import log_user_activity
-        from app.schemas import ActivityType
-        log_user_activity(
-            db=db,
-            user=user,
-            activity_type=ActivityType.USER_REGISTER,
-            description=f"用户注册成功: {user.username or user.email or user.phone}",
-            request=request,
-            metadata={"registration_method": "email" if user.email else "phone"}
-        )
+
         
         return UserResponse(
             id=user.id,
@@ -84,17 +74,7 @@ async def login_user(
                 detail="用户名或密码错误"
             )
         
-        # 记录用户登录活动
-        from app.utils.activity_logger import log_user_activity
-        from app.schemas import ActivityType
-        log_user_activity(
-            db=db,
-            user=token_response.user,
-            activity_type=ActivityType.USER_LOGIN,
-            description=f"用户登录成功: {login_data.login_credential}",
-            request=request,
-            metadata={"login_credential": login_data.login_credential}
-        )
+
         
         return token_response
     except HTTPException:
@@ -153,23 +133,6 @@ async def update_current_user(
         logger.error(f"更新用户信息失败: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="更新失败")
 
-# @router.get("/activities")
-# async def get_user_activities(
-#     limit: int = 5,
-#     activity_type: Optional[str] = None,
-#     current_user: User = Depends(get_current_user),
-#     db: Session = Depends(get_db)
-# ):
-#     """获取当前用户的活动记录"""
-#     logger.info(f"🔍 进入 get_user_activities 方法 - 用户ID: {current_user.id}")
-    
-#     # 简单返回测试数据
-#     return {
-#         "message": "活动记录接口正常",
-#         "user_id": current_user.id,
-#         "limit": limit,
-#         "activity_type": activity_type
-#     }
 
 @router.get("/activities", response_model=List[UserActivityResponse])
 async def get_user_activities(
@@ -377,16 +340,7 @@ async def logout_user(
         token = credentials.credentials
         success = auth_service.logout(token)
         
-        # 记录用户登出活动
-        from app.utils.activity_logger import log_user_activity
-        from app.schemas import ActivityType
-        log_user_activity(
-            db=db,
-            user=current_user,
-            activity_type=ActivityType.USER_LOGOUT,
-            description="用户登出",
-            request=request
-        )
+
         
         if success:
             return {"success": True, "message": "登出成功"}

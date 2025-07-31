@@ -53,6 +53,7 @@ def get_langchain_adapter():
 @router.post("/", response_model=ConversationResponse)
 async def create_conversation(
     request: ConversationCreate,
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -63,6 +64,23 @@ async def create_conversation(
             kb_id=request.kb_id,
             user_id=current_user.id,
             title=request.title
+        )
+        
+        # 记录创建会话活动
+        from app.utils.activity_logger import log_user_activity
+        from app.schemas import ActivityType
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.CONVERSATION_CREATE,
+            description=f"创建会话: {conversation.title or '新对话'}",
+            request=http_request,
+            resource_type="conversation",
+            resource_id=conversation.id,
+            metadata={
+                "kb_id": request.kb_id,
+                "title": conversation.title
+            }
         )
         
         # 转换为响应模型

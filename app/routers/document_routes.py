@@ -217,18 +217,7 @@ async def get_document_status(
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权限访问")
     
-    # 记录文档查看活动
-    from app.utils.activity_logger import log_user_activity
-    from app.schemas import ActivityType
-    log_user_activity(
-        db=db,
-        user=current_user,
-        activity_type=ActivityType.DOCUMENT_VIEW,
-        description=f"查看文档状态: {document.filename}",
-        request=request,
-        resource_type="document",
-        resource_id=document_id
-    )
+
     
     # 计算进度
     progress = 0
@@ -269,18 +258,7 @@ async def get_document_info(
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在或无权限访问")
     
-    # 记录文档查看活动
-    from app.utils.activity_logger import log_user_activity
-    from app.schemas import ActivityType
-    log_user_activity(
-        db=db,
-        user=current_user,
-        activity_type=ActivityType.DOCUMENT_VIEW,
-        description=f"查看文档详情: {document.filename}",
-        request=request,
-        resource_type="document",
-        resource_id=document_id
-    )
+
     
     from app.schemas import FileType
     
@@ -370,19 +348,7 @@ async def delete_document(
         db.commit()
         logger.info(f"已删除文档 {document_id} 的数据库记录")
         
-        # 记录文档删除活动
-        from app.utils.activity_logger import log_user_activity
-        from app.schemas import ActivityType
-        log_user_activity(
-            db=db,
-            user=current_user,
-            activity_type=ActivityType.DOCUMENT_DELETE,
-            description=f"删除文档: {document.filename}",
-            request=request,
-            resource_type="document",
-            resource_id=document_id,
-            metadata={"filename": document.filename}
-        )
+
         
         return {"message": f"文档 {document_id} 已成功删除"}
     except Exception as e:
@@ -419,19 +385,7 @@ async def download_document(
         if not download_info["success"]:
             raise HTTPException(status_code=500, detail=download_info["error"])
         
-        # 记录文档下载活动
-        from app.utils.activity_logger import log_user_activity
-        from app.schemas import ActivityType
-        log_user_activity(
-            db=db,
-            user=current_user,
-            activity_type=ActivityType.DOCUMENT_DOWNLOAD,
-            description=f"下载文档: {document.filename}",
-            request=request,
-            resource_type="document",
-            resource_id=document_id,
-            metadata={"filename": document.filename}
-        )
+
         
         return {
             "document_id": document_id,
