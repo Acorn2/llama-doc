@@ -79,25 +79,89 @@ class KnowledgeSearchTool(BaseTool):
     def __init__(self, langchain_adapter: LangChainAdapter, kb_id: str):
         super().__init__(adapter=langchain_adapter, kb_id=kb_id)
     
-    def _run(self, query: str) -> str:
+    def _run(self, query: str) -> Dict[str, Any]:
         """执行知识搜索"""
         try:
             retriever = self.adapter.create_langchain_retriever(self.kb_id)
             docs = retriever.get_relevant_documents(query)
             
             if not docs:
-                return "未找到相关信息"
+                return {
+                    "results": [],
+                    "message": "未找到相关信息"
+                }
             
-            # 格式化搜索结果
+            # 格式化搜索结果，包含来源信息
             results = []
             for i, doc in enumerate(docs[:5], 1):
-                results.append(f"结果 {i}:\n{doc.page_content[:300]}...")
+                # 获取文档详细信息
+                document_info = self._get_document_info(doc.metadata.get('document_id', ''))
+                
+                result_item = {
+                    "index": i,
+                    "content": doc.page_content[:500],  # 增加内容长度
+                    "similarity_score": doc.metadata.get('similarity_score', 0.0),
+                    "source": {
+                        "document_id": doc.metadata.get('document_id', ''),
+                        "document_name": document_info.get('filename', '未知文档'),
+                        "chunk_id": doc.metadata.get('chunk_id', ''),
+                        "chunk_index": doc.metadata.get('chunk_index', 0),
+                        "file_type": document_info.get('file_type', ''),
+                        "upload_time": document_info.get('upload_time', '')
+                    },
+                    "metadata": {
+                        "keywords": doc.metadata.get('keywords', []),
+                        "summary": doc.metadata.get('summary', ''),
+                        "quality_score": doc.metadata.get('quality_score', 0.5)
+                    }
+                }
+                results.append(result_item)
             
-            return "\n\n".join(results)
+            return {
+                "results": results,
+                "total_found": len(results),
+                "message": f"找到 {len(results)} 个相关结果"
+            }
             
         except Exception as e:
             logger.error(f"知识搜索工具执行失败: {e}")
-            return f"搜索失败: {str(e)}"
+            return {
+                "results": [],
+                "error": str(e),
+                "message": "搜索失败"
+            }
+    
+    def _get_document_info(self, document_id: str) -> Dict[str, Any]:
+        """获取文档详细信息"""
+        try:
+            from app.database import SessionLocal, Document
+            
+            # 创建数据库会话
+            db = SessionLocal()
+            
+            try:
+                document = db.query(Document).filter(Document.id == document_id).first()
+                if document:
+                    return {
+                        "filename": document.filename,
+                        "file_type": document.file_type or "",
+                        "upload_time": document.upload_time.isoformat() if document.upload_time else '',
+                        "file_size": document.file_size or 0,
+                        "pages": document.pages or 0
+                    }
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.warning(f"获取文档信息失败: {e}")
+        
+        return {
+            "filename": "未知文档",
+            "file_type": "",
+            "upload_time": "",
+            "file_size": 0,
+            "pages": 0
+        }
 
 class SummaryTool(BaseTool):
     """文档摘要工具"""
@@ -385,19 +449,31 @@ class LangChainDocumentAgent:
         try:
             # 使用知识搜索工具
             search_tool = KnowledgeSearchTool(self.adapter, self.kb_id)
-            results = search_tool._run(query)
+            search_response = search_tool._run(query)
             
-            return {
-                "results": results,
-                "query": query,
-                "processing_time": time.time() - start_time,
-                "success": True
-            }
+            # 限制结果数量
+            if isinstance(search_response, dict) and "results" in search_response:
+                limited_results = search_response["results"][:max_results]
+                return {
+                    "results": limited_results,
+                    "total_found": len(limited_results),
+                    "query": query,
+                    "processing_time": time.time() - start_time,
+                    "success": True
+                }
+            else:
+                # 兼容旧格式
+                return {
+                    "results": search_response,
+                    "query": query,
+                    "processing_time": time.time() - start_time,
+                    "success": True
+                }
             
         except Exception as e:
             logger.error(f"知识搜索失败: {e}")
             return {
-                "results": "搜索失败",
+                "results": [],
                 "error": str(e),
                 "processing_time": time.time() - start_time,
                 "success": False
