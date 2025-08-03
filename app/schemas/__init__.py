@@ -209,12 +209,14 @@ class DocumentDeleteResponse(BaseModel):
     deleted_count: Optional[int] = None
 
 class DocumentListResponse(BaseModel):
-    """文档列表响应"""
-    success: bool
-    documents: List[DocumentInfo]
-    total: int
-    page: Optional[int] = None
-    page_size: Optional[int] = None
+    """文档列表响应模型"""
+    items: List[DocumentInfo] = Field(..., description="文档列表")
+    total: int = Field(..., description="文档总数")
+    page: int = Field(..., description="当前页码")
+    page_size: int = Field(..., description="每页大小")
+    total_pages: int = Field(..., description="总页数")
+    has_next: bool = Field(..., description="是否有下一页")
+    has_prev: bool = Field(..., description="是否有上一页")
 
 # 基础对话模型（兼容性）
 class ChatRequest(BaseModel):

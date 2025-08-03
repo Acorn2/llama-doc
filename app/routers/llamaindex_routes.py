@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, Document as DBDocument
 from app.schemas import (
     DocumentInfo, DocumentStatus, 
-    LlamaIndexQueryRequest, LlamaIndexQueryResponse
+    LlamaIndexQueryRequest, LlamaIndexQueryResponse, DocumentListResponse
 )
 from app.llamaindex.adapter import LlamaIndexAdapter
 from app.utils.file_utils import save_upload_file_temp
@@ -112,7 +112,7 @@ async def query_document(
         source_nodes=source_nodes
     )
 
-@router.get("/documents", response_model=List[DocumentInfo])
+@router.get("/documents", response_model=DocumentListResponse)
 async def list_documents(
     user_id: Optional[str] = None,
     skip: int = 0,
@@ -129,11 +129,20 @@ async def list_documents(
     if user_id:
         query = query.filter(DBDocument.user_id == user_id)
     
-    # 获取文档列表
+    # 获取总数
+    total = query.count()
+    
+    # 获取分页数据
     documents = query.offset(skip).limit(limit).all()
     
-    # 返回文档列表
-    return [
+    # 计算分页信息
+    page = (skip // limit) + 1 if limit > 0 else 1
+    total_pages = (total + limit - 1) // limit if limit > 0 else 1
+    has_next = skip + limit < total
+    has_prev = skip > 0
+    
+    # 构建文档信息列表
+    document_items = [
         DocumentInfo(
             document_id=doc.id,
             filename=doc.filename,
@@ -147,4 +156,14 @@ async def list_documents(
             max_retries=doc.max_retries
         )
         for doc in documents
-    ] 
+    ]
+    
+    return DocumentListResponse(
+        items=document_items,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages,
+        has_next=has_next,
+        has_prev=has_prev
+    ) 

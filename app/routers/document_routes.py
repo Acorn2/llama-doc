@@ -14,7 +14,7 @@ from app.database import get_db, Document, User
 from app.core.dependencies import get_current_user
 from app.schemas import (
     DocumentUploadResponse, TaskStatus, DocumentInfo, 
-    DocumentStatusResponse, DuplicateCheckResponse
+    DocumentStatusResponse, DuplicateCheckResponse, DocumentListResponse
 )
 from app.utils.file_utils import calculate_content_md5, is_duplicate_file
 from app.utils.file_storage import file_storage_manager
@@ -276,7 +276,7 @@ async def get_document_info(
         max_retries=document.max_retries
     )
 
-@router.get("", response_model=List[DocumentInfo])
+@router.get("", response_model=DocumentListResponse)
 async def list_documents(
     skip: int = 0, 
     limit: int = 20, 
@@ -284,13 +284,26 @@ async def list_documents(
     db: Session = Depends(get_db)
 ):
     """获取当前用户的文档列表"""
+    # 获取总数
+    total = db.query(Document).filter(
+        Document.user_id == current_user.id
+    ).count()
+    
+    # 获取分页数据
     documents = db.query(Document).filter(
         Document.user_id == current_user.id  # 只显示当前用户的文档
     ).offset(skip).limit(limit).all()
     
     from app.schemas import FileType
     
-    return [
+    # 计算分页信息
+    page = (skip // limit) + 1 if limit > 0 else 1
+    total_pages = (total + limit - 1) // limit if limit > 0 else 1
+    has_next = skip + limit < total
+    has_prev = skip > 0
+    
+    # 构建文档信息列表
+    document_items = [
         DocumentInfo(
             document_id=doc.id,
             filename=doc.filename,
@@ -306,6 +319,16 @@ async def list_documents(
         )
         for doc in documents
     ]
+    
+    return DocumentListResponse(
+        items=document_items,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages,
+        has_next=has_next,
+        has_prev=has_prev
+    )
 
 @router.delete("/{document_id}")
 async def delete_document(
