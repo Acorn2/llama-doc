@@ -61,7 +61,10 @@ fi
 # 加载环境变量
 if [ -f ".env.production" ]; then
     echo "📋 加载生产环境变量..."
-    export $(grep -v '^#' .env.production | xargs)
+    # 使用 set -a 来避免特殊字符问题
+    set -a
+    source .env.production
+    set +a
     echo "✅ 环境变量加载完成"
 fi
 

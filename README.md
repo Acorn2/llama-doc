@@ -99,47 +99,83 @@ intelligent-document-platform/
 ├── app/                          # 应用主目录
 │   ├── main.py                   # FastAPI应用入口
 │   ├── database.py               # 数据库模型和连接
-│   ├── schemas.py                # Pydantic数据模型
 │   ├── logging_config.py         # 日志配置
+│   ├── schemas.py                # Pydantic通用数据模型
 │   │
-│   ├── api/                      # API层
-│   │   ├── exception_handlers.py # 异常处理器
-│   │   └── health.py            # 健康检查接口
-│   │
-│   ├── routers/                  # 路由模块
-│   │   ├── user_router.py        # 用户管理路由
-│   │   ├── document_routes.py    # 文档管理路由
-│   │   ├── knowledge_base_router.py # 知识库路由
-│   │   ├── conversation_routes.py   # 对话管理路由
-│   │   ├── agent_router.py       # Agent智能体路由
-│   │   ├── system_router.py      # 系统信息路由
-│   │   └── test_routes.py        # 测试接口路由
-│   │
-│   ├── services/                 # 服务层
-│   │   ├── user_service.py       # 用户服务
-│   │   ├── agent_service.py      # Agent服务
-│   │   ├── conversation_service.py # 对话服务
-│   │   ├── knowledge_base_service.py # 知识库服务
-│   │   ├── document_service.py   # 文档处理服务
-│   │   ├── vector_sync_service.py # 向量同步服务
-│   │   └── langchain_adapter.py  # LangChain适配器
-│   │
-│   ├── core/                     # 核心层
-│   │   ├── langchain_agent.py    # LangChain Agent实现
-│   │   ├── model_factory.py      # 模型工厂
-│   │   ├── container.py          # 依赖注入容器
-│   │   └── security.py           # 安全认证
+│   ├── api/                      # API基础层
+│   │   ├── dependencies.py       # 依赖注入配置
+│   │   ├── exception_handlers.py # 全局异常处理
+│   │   └── health.py             # 健康检查接口
 │   │
 │   ├── config/                   # 配置管理
-│   │   └── settings.py           # 应用配置
+│   │   ├── settings.py           # 应用配置定义
+│   │   └── logging.py            # 日志配置实现
+│   │
+│   ├── core/                     # 核心业务逻辑
+│   │   ├── agent_core.py         # Agent核心编排
+│   │   ├── application.py        # 应用工厂类
+│   │   ├── cache_manager.py      # 缓存管理器
+│   │   ├── container.py          # 依赖注入容器
+│   │   ├── document_processor.py # 文档处理器
+│   │   ├── enhanced_vector_store.py # 增强向量存储
+│   │   ├── langchain_agent.py    # LangChain Agent实现
+│   │   ├── model_factory.py      # 模型工厂
+│   │   ├── qdrant_adapter.py     # Qdrant适配器
+│   │   ├── redis_client.py       # Redis客户端
+│   │   └── vector_store.py       # 向量存储基类
+│   │
+│   ├── infrastructure/           # 基础设施层
+│   │   ├── llm/                  # LLM实现适配
+│   │   └── vector_stores/        # 向量库实现适配
+│   │
+│   ├── llamaindex/               # LlamaIndex集成
+│   │   ├── adapter.py            # 适配器接口
+│   │   ├── document_loader.py    # 文档加载
+│   │   ├── index_manager.py      # 索引管理
+│   │   ├── query_engine.py       # 查询引擎
+│   │   └── qwen_integration.py   # 通义千问集成
+│   │
+│   ├── llm/                      # LLM模型层
+│   │   ├── qwen_adapter.py       # Qwen适配器
+│   │   └── qwen_embeddings.py    # Qwen Embeddings
 │   │
 │   ├── middleware/               # 中间件
-│   │   └── error_handling.py     # 错误处理中间件
+│   │   └── error_handling.py     # 异常处理中间件
 │   │
-│   └── utils/                    # 工具模块
+│   ├── routers/                  # 路由层
+│   │   ├── agent_router.py       # Agent路由
+│   │   ├── conversation_routes.py # 对话路由
+│   │   ├── document_routes.py    # 文档路由
+│   │   ├── knowledge_base_routes.py # 知识库路由
+│   │   ├── llamaindex_routes.py  # LlamaIndex路由
+│   │   ├── query_routes.py       # 搜索查询路由
+│   │   ├── system_routes.py      # 系统信息路由
+│   │   ├── user_routes.py        # 用户管理路由
+│   │   └── test_routes.py        # 测试路由
+│   │
+│   ├── schemas/                  # 数据模型扩展
+│   │   └── agent_schemas.py      # Agent特有模型
+│   │
+│   ├── services/                 # 业务服务层
+│   │   ├── activity_service.py   # 活动记录服务
+│   │   ├── agent_service.py      # Agent服务
+│   │   ├── auth_service.py       # 认证服务
+│   │   ├── conversation_service.py # 对话服务
+│   │   ├── document_service.py   # 文档服务
+│   │   ├── knowledge_base_service.py # 知识库服务
+│   │   ├── langchain_adapter.py  # LangChain适配服务
+│   │   ├── user_service.py       # 用户服务
+│   │   └── vector_sync_service.py # 向量同步服务
+│   │
+│   └── utils/                    # 工具类
+│       ├── activity_logger.py    # 活动日志记录
+│       ├── cos_client.py         # 腾讯云COS客户端
 │       ├── download_manager.py   # 下载管理器
-│       ├── file_utils.py         # 文件工具
-│       └── activity_logger.py    # 活动记录器
+│       ├── exceptions.py         # 异常类定义
+│       ├── file_storage.py       # 文件存储工具
+│       ├── file_utils.py         # 文件操作辅助
+│       ├── pdf_debug_analyzer.py # PDF调试分析
+│       └── streaming_utils.py    # 流式输出工具
 │
 ├── docs/                         # 文档目录
 │   ├── API接口文档-完整版.md      # API文档

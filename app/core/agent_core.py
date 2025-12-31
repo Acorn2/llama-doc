@@ -103,7 +103,8 @@ class DocumentAnalysisAgent:
         question: str, 
         search_results: List[Dict] = None,
         max_results: int = 5,
-        use_enhanced_prompt: bool = False
+        use_enhanced_prompt: bool = False,
+        file_type: str = None
     ) -> Dict:
         """回答基于文档的问题"""
         start_time = time.time()
@@ -114,7 +115,8 @@ class DocumentAnalysisAgent:
                 search_results = self.vector_store.search_similar_chunks(
                     document_id=document_id,
                     query=question,
-                    k=max_results
+                    k=max_results,
+                    file_type=file_type
                 )
             
             if not search_results:
@@ -183,14 +185,15 @@ class DocumentAnalysisAgent:
                 "error": str(e)
             }
     
-    def generate_summary(self, document_id: str) -> Dict:
+    def generate_summary(self, document_id: str, file_type: str = None) -> Dict:
         """生成文档摘要"""
         try:
             # 获取文档的所有块（用于生成摘要）
             search_results = self.vector_store.search_similar_chunks(
                 document_id=document_id,
                 query="文档主要内容 核心观点 关键信息",
-                k=10
+                k=10,
+                file_type=file_type
             )
             
             if not search_results:
@@ -264,7 +267,8 @@ class DocumentAnalysisAgent:
         self, 
         document_id: str, 
         question: str, 
-        max_results: int = 5
+        max_results: int = 5,
+        file_type: str = None
     ) -> Dict:
         """增强的问答方法 - 包含质量评估和优化"""
         start_time = time.time()
@@ -275,13 +279,15 @@ class DocumentAnalysisAgent:
                 search_results = self.vector_store.hybrid_search(
                     document_id=document_id,
                     query=question,
-                    k=max_results
+                    k=max_results,
+                    file_type=file_type
                 )
             else:
                 search_results = self.vector_store.search_similar_chunks(
                     document_id=document_id,
                     query=question,
-                    k=max_results
+                    k=max_results,
+                    file_type=file_type
                 )
             
             if not search_results:
@@ -618,7 +624,7 @@ class DocumentAnalysisAgent:
         
         return sources
 
-    def generate_summary_enhanced(self, document_id: str) -> Dict:
+    def generate_summary_enhanced(self, document_id: str, file_type: str = None) -> Dict:
         """生成增强的文档摘要"""
         try:
             # 1. 获取高质量的文档片段用于摘要
@@ -635,7 +641,8 @@ class DocumentAnalysisAgent:
                     results = self.vector_store.hybrid_search(
                         document_id=document_id,
                         query=query,
-                        k=5
+                        k=5,
+                        file_type=file_type
                     )
                     all_results.extend(results)
                 
@@ -657,7 +664,8 @@ class DocumentAnalysisAgent:
                 search_results = self.vector_store.search_similar_chunks(
                     document_id=document_id,
                     query="文档主要内容 核心观点 关键信息",
-                    k=8
+                    k=8,
+                    file_type=file_type
                 )
             
             if not search_results:

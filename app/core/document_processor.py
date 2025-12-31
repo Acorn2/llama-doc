@@ -10,6 +10,7 @@ from pathlib import Path
 from llama_index.core.schema import Document
 from llama_index.readers.file import PyMuPDFReader
 from llama_index.core import SimpleDirectoryReader
+from llama_index.core.node_parser import SentenceSplitter
 
 # 修改logger名称，确保与日志配置中一致
 logger = logging.getLogger("app.core.document_processor")
@@ -481,33 +482,42 @@ class DocumentProcessor:
                 # 提取元数据
                 metadata = self.extract_metadata(temp_file_path)
                 
-                # 将文档转换为文本块
+                # 使用SentenceSplitter进行语义分块
+                logger.info("开始进行语义分块...")
+                text_splitter = SentenceSplitter(
+                    chunk_size=1024,
+                    chunk_overlap=200
+                )
+                
+                nodes = text_splitter.get_nodes_from_documents(documents)
+                logger.info(f"语义分块完成，生成 {len(nodes)} 个节点")
+                
                 chunks = []
-                for doc in documents:
-                    # 简单的文本分块（可以后续优化）
-                    text = doc.text
-                    chunk_size = 1000  # 每块1000字符
+                for i, node in enumerate(nodes):
+                    chunk_text = node.get_content()
+                    if not chunk_text.strip():
+                        continue
+                        
+                    # 生成UUID格式的chunk_id
+                    import uuid
+                    chunk_id = str(uuid.uuid4())
                     
-                    for i in range(0, len(text), chunk_size):
-                        chunk_text = text[i:i + chunk_size]
-                        if chunk_text.strip():
-                            chunk_index = len(chunks)
-                            # 生成UUID格式的chunk_id
-                            import uuid
-                            chunk_id = str(uuid.uuid4())
-                            
-                            chunks.append({
-                                "content": chunk_text,  # 使用content字段匹配vector_store期望
-                                "chunk_id": chunk_id,  # 使用UUID格式的chunk_id
-                                "chunk_index": chunk_index,
-                                "chunk_length": len(chunk_text),
-                                "document_id": document_id,
-                                "metadata": {
-                                    **doc.metadata,
-                                    "chunk_index": chunk_index,
-                                    "document_id": document_id
-                                }
-                            })
+                    # 合并节点元数据和文件级元数据
+                    chunk_metadata = metadata.copy()
+                    chunk_metadata.update(node.metadata)
+                    chunk_metadata.update({
+                        "chunk_index": i,
+                        "document_id": document_id
+                    })
+                    
+                    chunks.append({
+                        "content": chunk_text,
+                        "chunk_id": chunk_id,
+                        "chunk_index": i,
+                        "chunk_length": len(chunk_text),
+                        "document_id": document_id,
+                        "metadata": chunk_metadata
+                    })
                 
                 # 设置页数（对于非PDF文件，设置为1）
                 if 'pages' not in metadata:

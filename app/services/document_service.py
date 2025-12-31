@@ -167,13 +167,13 @@ class DocumentTaskProcessor:
                 try:
                     # 创建向量存储
                     logger.info(f"创建文档向量集合: {document_id}")
-                    create_result = vector_store.create_document_collection(document_id)
+                    create_result = vector_store.create_document_collection(document_id, file_type=file_ext)
                     if not create_result:
                         raise Exception("创建向量集合失败")
                     
                     # 添加向量
                     logger.info(f"添加文档块到向量存储，共{len(result['chunks'])}个块")
-                    add_result = vector_store.add_document_chunks(document_id, result["chunks"])
+                    add_result = vector_store.add_document_chunks(document_id, result["chunks"], file_type=file_ext)
                     if not add_result:
                         raise Exception("添加向量数据失败")
                     

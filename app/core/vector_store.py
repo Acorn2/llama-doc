@@ -40,10 +40,26 @@ class VectorStoreManager:
         
         logger.info(f"Qdrant向量存储管理器初始化完成 - 服务器: {self.qdrant_host}:{self.qdrant_port}")
     
-    def create_document_collection(self, document_id: str) -> bool:
+    def get_collection_name(self, document_id: str, file_type: str = None) -> str:
+        """根据文档ID和文件类型生成集合名称"""
+        if not file_type:
+            return f"doc_{document_id}"
+            
+        ft = file_type.lower().replace('.', '')
+        
+        if ft == 'pdf':
+            return f"pdf_{document_id}"
+        elif ft in ['txt', 'md', 'markdown']:
+            return f"txt_{document_id}"
+        elif ft in ['doc', 'docx']:
+            return f"doc_{document_id}"
+        else:
+            return f"doc_{document_id}"
+
+    def create_document_collection(self, document_id: str, file_type: str = None) -> bool:
         """为文档创建向量集合"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             
             # 获取嵌入维度
             dimension = 1536  # 默认维度
@@ -57,10 +73,10 @@ class VectorStoreManager:
             logger.error(f"创建文档集合失败: {str(e)}")
             return False
     
-    def add_document_chunks(self, document_id: str, chunks: List[Dict]) -> bool:
+    def add_document_chunks(self, document_id: str, chunks: List[Dict], file_type: str = None) -> bool:
         """添加文档块到向量存储"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             
             # 准备文本用于嵌入
             texts = [chunk["content"] for chunk in chunks]
@@ -99,11 +115,12 @@ class VectorStoreManager:
         self, 
         document_id: str, 
         query: str, 
-        k: int = 5
+        k: int = 5,
+        file_type: str = None
     ) -> List[Dict]:
         """搜索相似文档块"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             
             # 生成查询向量
             query_embedding = self.embeddings.embed_query(query)
@@ -140,20 +157,20 @@ class VectorStoreManager:
             logger.error(f"搜索相似块失败: {str(e)}")
             return []
     
-    def delete_document_collection(self, document_id: str) -> bool:
+    def delete_document_collection(self, document_id: str, file_type: str = None) -> bool:
         """删除文档的向量集合"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             return self.qdrant_client.delete_collection(collection_name)
             
         except Exception as e:
             logger.error(f"删除文档集合失败: {str(e)}")
             return False
     
-    def get_collection_stats(self, document_id: str) -> Dict:
+    def get_collection_stats(self, document_id: str, file_type: str = None) -> Dict:
         """获取集合统计信息"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             return self.qdrant_client.get_collection_info(collection_name)
             
         except Exception as e:

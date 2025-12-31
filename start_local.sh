@@ -86,7 +86,7 @@ pip install -r requirements.txt
 echo "🔍 检查关键依赖..."
 python -c "
 try:
-    import fastapi, dashscope, langchain, chromadb, sqlalchemy
+    import fastapi, dashscope, langchain, sqlalchemy
     print('✅ 所有关键依赖检查通过')
 except ImportError as e:
     print(f'❌ 依赖检查失败: {e}')

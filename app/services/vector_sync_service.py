@@ -104,7 +104,11 @@ class VectorSyncProcessor:
                 raise ValueError("知识库或文档不存在")
             
             # 执行向量复制
-            source_collection = f"doc_{record.document_id}"
+            # 使用vector_store_manager辅助方法获取正确的集合名称
+            source_collection = self.kb_manager.vector_store_manager.get_collection_name(
+                document_id=record.document_id, 
+                file_type=document.file_type
+            )
             target_collection = kb.vector_store_name
             
             success = self.kb_manager._copy_document_vectors_to_kb(

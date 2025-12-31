@@ -48,10 +48,11 @@ async def query_document(
         start_time = time.time()
         
         # 从向量存储中检索相关文本块
-        search_results = vector_store.search_document(
+        search_results = vector_store.search_similar_chunks(
             document_id=document_id,
             query=request.question,
-            k=request.max_results
+            k=request.max_results,
+            file_type=document.file_type
         )
         
         if not search_results:
@@ -66,7 +67,8 @@ async def query_document(
         response = agent.answer_question(
             document_id=document_id,
             question=request.question,
-            search_results=search_results
+            search_results=search_results,
+            file_type=document.file_type
         )
         
         processing_time = time.time() - start_time
@@ -112,11 +114,12 @@ async def hybrid_query_document(
         start_time = time.time()
         
         # 使用混合检索
-        search_results = vector_store.hybrid_search(
+        search_results = enhanced_vector_store.hybrid_search(
             document_id=document_id,
             query=request.question,
             k=request.max_results,
-            alpha=0.7  # 向量搜索权重
+            alpha=0.7,  # 向量搜索权重
+            file_type=document.file_type
         )
         
         if not search_results:
@@ -131,7 +134,8 @@ async def hybrid_query_document(
         response = agent.answer_question(
             document_id=document_id,
             question=request.question,
-            search_results=search_results
+            search_results=search_results,
+            file_type=document.file_type
         )
         
         processing_time = time.time() - start_time
@@ -190,10 +194,11 @@ async def enhanced_query_document(
             )
         
         # 使用增强向量存储进行检索
-        search_results = enhanced_vector_store.search(
+        search_results = enhanced_vector_store.search_similar_chunks_with_cache(
             document_id=document_id,
             query=request.question,
-            k=request.max_results
+            k=request.max_results,
+            file_type=document.file_type
         )
         
         if not search_results:
@@ -209,7 +214,8 @@ async def enhanced_query_document(
             document_id=document_id,
             question=request.question,
             search_results=search_results,
-            use_enhanced_prompt=True
+            use_enhanced_prompt=True,
+            file_type=document.file_type
         )
         
         processing_time = time.time() - start_time
@@ -266,7 +272,7 @@ async def generate_document_summary(document_id: str, db: Session = Depends(get_
             return cached_summary
         
         # 生成摘要
-        summary = agent.generate_document_summary(document_id)
+        summary = agent.generate_summary(document_id, file_type=document.file_type)
         
         # 缓存摘要
         cache_manager.set(cache_key, summary, ttl=86400)  # 缓存24小时
@@ -298,7 +304,7 @@ async def generate_enhanced_document_summary(document_id: str, db: Session = Dep
             return cached_summary
         
         # 生成增强摘要
-        summary = agent.generate_enhanced_document_summary(document_id)
+        summary = agent.generate_summary_enhanced(document_id, file_type=document.file_type)
         
         # 缓存摘要
         cache_manager.set(cache_key, summary, ttl=86400)  # 缓存24小时

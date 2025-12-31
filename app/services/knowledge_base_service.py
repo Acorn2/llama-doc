@@ -157,7 +157,10 @@ class KnowledgeBaseManager:
                     logger.warning("向量集合创建失败，但继续执行数据库操作")
             
             # 2. 尝试将文档向量数据复制到知识库集合
-            document_collection = f"doc_{document_id}"
+            document_collection = self.vector_store_manager.get_collection_name(
+                document_id=document_id,
+                file_type=document.file_type
+            )
             success = self._copy_document_vectors_to_kb(
                 source_collection=document_collection,
                 target_collection=kb_collection_name,

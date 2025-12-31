@@ -32,7 +32,10 @@ elif [ "$ENVIRONMENT" = "production" ]; then
     
     # 加载生产环境配置
     if [ -f "$ENV_FILE" ]; then
-        export $(grep -v '^#' "$ENV_FILE" | xargs)
+        # 使用 set -a 来避免特殊字符问题
+        set -a
+        source "$ENV_FILE"
+        set +a
         echo "✅ 已加载生产环境变量"
     fi
     

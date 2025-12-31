@@ -27,7 +27,8 @@ class EnhancedVectorStore(VectorStoreManager):
         self, 
         document_id: str, 
         query: str, 
-        k: int = 5
+        k: int = 5,
+        file_type: str = None
     ) -> List[Dict]:
         """带缓存的向量搜索"""
         
@@ -40,17 +41,17 @@ class EnhancedVectorStore(VectorStoreManager):
             return cached_result
         
         # 执行搜索
-        results = self.search_similar_chunks(document_id, query, k)
+        results = self.search_similar_chunks(document_id, query, k, file_type=file_type)
         
         # 缓存结果（1小时）
         self.cache_manager.set(cache_key, results, expire=3600)
         
         return results
     
-    def add_document_chunks_enhanced(self, document_id: str, chunks: List[Dict]) -> bool:
+    def add_document_chunks_enhanced(self, document_id: str, chunks: List[Dict], file_type: str = None) -> bool:
         """增强的文档块添加"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             
             # 增强文本内容用于向量化
             enhanced_texts = []
@@ -116,7 +117,8 @@ class EnhancedVectorStore(VectorStoreManager):
         document_id: str, 
         query: str, 
         k: int = 5,
-        alpha: float = 0.7
+        alpha: float = 0.7,
+        file_type: str = None
     ) -> List[Dict]:
         """混合检索：向量搜索 + 关键词搜索"""
         
@@ -126,11 +128,11 @@ class EnhancedVectorStore(VectorStoreManager):
             
             # 向量搜索（使用扩展查询）
             vector_results = self.search_similar_chunks_with_cache(
-                document_id, expanded_query, k * 2
+                document_id, expanded_query, k * 2, file_type=file_type
             )
             
             # 关键词搜索（使用原始查询）
-            keyword_results = self._enhanced_keyword_search(document_id, query, k * 2)
+            keyword_results = self._enhanced_keyword_search(document_id, query, k * 2, file_type=file_type)
             
             # 融合搜索结果
             combined_results = self._combine_search_results(
@@ -145,7 +147,7 @@ class EnhancedVectorStore(VectorStoreManager):
         except Exception as e:
             logger.error(f"混合搜索失败: {e}")
             # 降级到普通向量搜索
-            return self.search_similar_chunks_with_cache(document_id, query, k)
+            return self.search_similar_chunks_with_cache(document_id, query, k, file_type=file_type)
     
     def _expand_query(self, query: str) -> str:
         """查询扩展"""
@@ -173,10 +175,10 @@ class EnhancedVectorStore(VectorStoreManager):
             logger.warning(f"查询扩展失败: {e}")
             return query
     
-    def _enhanced_keyword_search(self, document_id: str, query: str, k: int) -> List[Dict]:
+    def _enhanced_keyword_search(self, document_id: str, query: str, k: int, file_type: str = None) -> List[Dict]:
         """增强的关键词搜索"""
         try:
-            collection_name = f"doc_{document_id}"
+            collection_name = self.get_collection_name(document_id, file_type)
             
             # 获取所有点
             all_results = self.qdrant_client.search(
