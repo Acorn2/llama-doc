@@ -78,8 +78,27 @@ async def upload_document(
             # 获取已存在的文档信息
             existing_doc = db.query(Document).filter(Document.id == existing_doc_id).first()
             
-            logger.info(f"发现重复文件，返回已存在的文档ID: {existing_doc_id}")
+            logger.info(f"发现重复文件，返回已存在的文档ID: {existing_doc_id}, 当前状态: {existing_doc.status}")
             
+            # 如果文档未处理完成，尝试开启/重新开启处理任务
+            should_retry = False
+            if existing_doc.status == "pending":
+                should_retry = True
+            elif existing_doc.status == "failed":
+                should_retry = True
+            elif existing_doc.status == "processing":
+                # 检查是否卡住（比如超过10分钟）
+                if existing_doc.process_start_time:
+                    from datetime import datetime, timedelta
+                    if datetime.now() - existing_doc.process_start_time > timedelta(minutes=10):
+                        logger.warning(f"由于处理时间过长，认为文档 {existing_doc_id} 已卡住，重新触发任务")
+                        should_retry = True
+            
+            if should_retry:
+                from app.tasks.document_tasks import process_document_task
+                process_document_task.delay(existing_doc_id)
+                logger.info(f"已为重复但未完成的文档 {existing_doc_id} 重新提交处理任务")
+
             return DocumentUploadResponse(
                 document_id=existing_doc_id,
                 filename=existing_doc.filename,

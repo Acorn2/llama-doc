@@ -14,32 +14,29 @@ cleanup_and_exit() {
     echo "🛑 正在停止服务..."
     
     if [ ! -z "$API_PID" ]; then
-        # Check if process exists
         if kill -0 $API_PID 2>/dev/null; then
-            echo "   发送停止信号给进程 $API_PID..."
+            echo "   发送停止信号给 API 进程 $API_PID..."
             kill $API_PID
-            
-            # Wait for process to exit (max 10 seconds)
-            count=0
-            while kill -0 $API_PID 2>/dev/null && [ $count -lt 10 ]; do
-                sleep 1
-                ((count++))
-            done
-            
-            # Force kill if still running
-            if kill -0 $API_PID 2>/dev/null; then
-                echo "⚠️ 进程未响应，强制终止..."
-                kill -9 $API_PID 2>/dev/null || true
-            else
-                echo "✅ 服务已正常停止"
-            fi
-        else
-            echo "ℹ️ 进程 $API_PID 已不存在"
+        fi
+    fi
+
+    if [ ! -z "$CELERY_PID" ]; then
+        if kill -0 $CELERY_PID 2>/dev/null; then
+            echo "   发送停止信号给 Celery Worker $CELERY_PID..."
+            kill $CELERY_PID
         fi
     fi
     
-    # Clean up pid file
+    # Wait for processes to exit
+    sleep 2
+    
+    # Force kill if still running
+    [ ! -z "$API_PID" ] && kill -9 $API_PID 2>/dev/null || true
+    [ ! -z "$CELERY_PID" ] && kill -9 $CELERY_PID 2>/dev/null || true
+    
+    # Clean up pid files
     rm -f "$PID_FILE"
+    rm -f ".celery_pid"
     exit 0
 }
 
@@ -171,6 +168,12 @@ fi
 
 API_PID=$!
 echo $API_PID > "$PID_FILE"
+
+# Start Celery Worker
+echo "⚙️  启动 Celery Worker..."
+celery -A app.celery_app worker --loglevel=info > logs/celery.log 2>&1 &
+CELERY_PID=$!
+echo $CELERY_PID > ".celery_pid"
 
 # Wait for startup
 sleep 2
