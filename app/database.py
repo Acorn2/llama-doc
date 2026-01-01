@@ -359,9 +359,18 @@ class UserActivity(Base):
             Index('idx_activity_resource', 'resource_type', 'resource_id'),  # 资源索引
         )
 
-def get_db_session():
-    """获取数据库会话，带重试机制"""
+def get_db():
+    """获取数据库会话，用于FastAPI依赖注入"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_test_db():
+    """获取测试数据库连接，带重试机制（用于启动检查）"""
     max_retries = 3
+    db = None
     
     for attempt in range(max_retries):
         try:
@@ -387,9 +396,6 @@ def get_db_session():
             else:
                 logger.error(f"数据库连接失败，已达最大重试次数: {e}")
                 raise
-
-# 添加别名以兼容现有代码
-get_db = get_db_session
 
 def create_tables():
     """创建数据库表，仅在表不存在时创建"""
@@ -429,8 +435,9 @@ def create_tables():
                 logger.info("所有必需的表都已存在（可能是之前创建的）")
         
         # 测试数据库连接
-        test_db = get_db_session()
-        test_db.close()
+        test_db = get_test_db()
+        if test_db:
+            test_db.close()
         logger.info("数据库连接测试成功")
         
     except Exception as e:

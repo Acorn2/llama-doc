@@ -143,7 +143,11 @@ async def upload_document(
             )
             
             storage_info = "腾讯云COS" if storage_result["storage_type"] == "cos" else "本地存储"
-            logger.info(f"新文档上传成功({storage_info})，类型: {file_type.value}，等待处理: {document_id}")
+            logger.info(f"新文档上传成功({storage_info})，类型: {file_type.value}，已提交处理任务: {document_id}")
+            
+            # 使用Celery异步处理文档
+            from app.tasks.document_tasks import process_document_task
+            process_document_task.delay(document_id)
             
             # 如果指定了知识库ID，自动添加到知识库
             kb_message = ""

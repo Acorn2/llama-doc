@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from app.database import get_db_session, KnowledgeBaseDocument, Document, KnowledgeBase
+from app.database import SessionLocal, KnowledgeBaseDocument, Document, KnowledgeBase
 from app.services.knowledge_base_service import KnowledgeBaseManager
 
 logger = logging.getLogger(__name__)
@@ -40,11 +40,11 @@ class VectorSyncProcessor:
         """停止轮询"""
         self.is_running = False
         logger.info("向量同步轮询已停止")
-    
+
     async def process_pending_vector_sync(self):
         """处理待同步的向量数据"""
         # 使用专门的数据库会话获取函数
-        db = get_db_session()
+        db = SessionLocal()
         try:
             # 查找待同步的记录
             pending_records = self._get_pending_sync_records(db)

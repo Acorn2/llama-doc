@@ -16,7 +16,6 @@ import signal
 # 原有模块
 from app.database import create_tables
 from app.logging_config import setup_logging, RequestLoggingMiddleware
-from app.services.document_service import document_task_processor
 from app.routers import document_router, query_router, system_router, knowledge_base_router, conversation_router, user_router
 
 # 新架构模块
@@ -56,12 +55,6 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("非生产环境，尽管数据库初始化失败，应用将尝试继续运行")
     
-    # 启动文档处理轮询（原有功能）
-    logger.info("正在启动文档处理服务...")
-    polling_task = asyncio.create_task(document_task_processor.start_polling())
-    document_task_processor.main_task = polling_task
-    logger.info("✅ 文档处理服务启动完成")
-    
     # 启动向量同步服务
     logger.info("正在启动向量同步服务...")
     from app.services.vector_sync_service import vector_sync_processor
@@ -69,38 +62,6 @@ async def lifespan(app: FastAPI):
     vector_sync_processor.main_task = vector_sync_task
     logger.info("✅ 向量同步服务启动完成")
     
-    # 注册信号处理，确保在接收到系统信号时也能清理资源
-    def handle_signals(sig):
-        logger.info(f"接收到信号: {sig.name}，准备关闭服务...")
-        asyncio.create_task(shutdown_tasks())
-    
-    # 只在非Windows平台注册SIGTERM信号
-    if os.name != 'nt':  # 'nt'是Windows的标识
-        loop = asyncio.get_running_loop()
-        # 注册SIGTERM信号处理器
-        loop.add_signal_handler(signal.SIGTERM, lambda: handle_signals(signal.SIGTERM))
-    
-    async def shutdown_tasks():
-        """关闭异步任务的辅助函数"""
-        logger.info("🛑 正在关闭异步任务...")
-        document_task_processor.stop_polling()
-        vector_sync_processor.stop_polling()
-        
-        # 如果主任务存在且未完成，则取消它
-        if document_task_processor.main_task and not document_task_processor.main_task.done():
-            document_task_processor.main_task.cancel()
-            try:
-                await document_task_processor.main_task
-            except asyncio.CancelledError:
-                logger.info("文档处理主任务已取消")
-        
-        # 取消向量同步任务
-        if vector_sync_processor.main_task and not vector_sync_processor.main_task.done():
-            vector_sync_processor.main_task.cancel()
-            try:
-                await vector_sync_processor.main_task
-            except asyncio.CancelledError:
-                logger.info("向量同步主任务已取消")
     
     logger.info("🎉 所有服务启动完成")
     
@@ -110,23 +71,10 @@ async def lifespan(app: FastAPI):
         # 关闭时执行的代码
         logger.info("🛑 PDF文献分析智能体服务关闭中...")
         
-        # 停止文档处理轮询
-        document_task_processor.stop_polling()
-        logger.info("✅ 文档处理服务已停止")
-        
         # 停止向量同步服务
         from app.services.vector_sync_service import vector_sync_processor
         vector_sync_processor.stop_polling()
         logger.info("✅ 向量同步服务已停止")
-        
-        # 取消主任务
-        if document_task_processor.main_task and not document_task_processor.main_task.done():
-            document_task_processor.main_task.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(document_task_processor.main_task), timeout=2.0)
-                logger.info("✅ 文档处理主任务已取消")
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                logger.info("⚠️ 文档处理主任务取消超时")
         
         # 取消向量同步任务
         if vector_sync_processor.main_task and not vector_sync_processor.main_task.done():
@@ -148,8 +96,10 @@ async def lifespan(app: FastAPI):
             try:
                 await asyncio.wait_for(asyncio.gather(*pending_tasks, return_exceptions=True), timeout=5.0)
                 logger.info("✅ 所有任务已完成或已超时")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ 部分任务未能在超时时间内完成")
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                logger.warning("⚠️ 部分任务未能在超时时间内完成或因为关闭而取消")
+            except Exception as e:
+                logger.warning(f"⚠️ 等待任务结束时发生错误: {str(e)}")
         
         logger.info("👋 PDF文献分析智能体服务已关闭")
 
