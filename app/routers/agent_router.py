@@ -20,6 +20,8 @@ from app.api.dependencies import get_agent_service_dep, handle_service_exception
 from app.core.dependencies import get_current_user
 from app.database import User, get_db
 from sqlalchemy.orm import Session
+from app.utils.activity_logger import log_user_activity
+from app.schemas import ActivityType
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["Agent"])
@@ -46,7 +48,21 @@ async def agent_chat(
         llm_type=request_data.llm_type
     )
     
-
+    # 记录对话活动
+    log_user_activity(
+        db=db,
+        user=current_user,
+        activity_type=ActivityType.AGENT_CHAT if request_data.use_agent else ActivityType.CONVERSATION_CHAT,
+        description=f"发送消息: {request_data.message[:50]}...",
+        request=request,
+        resource_type="conversation",
+        resource_id=request_data.conversation_id or (result.get("data", {}).get("conversation_id") if isinstance(result, dict) and result.get("success") else None),
+        metadata={
+            "kb_id": request_data.kb_id,
+            "use_agent": request_data.use_agent,
+            "message_length": len(request_data.message)
+        }
+    )
     
     return result
 
@@ -186,6 +202,7 @@ async def get_agent_status(
 @handle_service_exceptions
 async def agent_chat_stream(
     request: AgentChatRequest,
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     agent_service: AgentService = Depends(get_agent_service_dep),
     db: Session = Depends(get_db)
@@ -213,6 +230,22 @@ async def agent_chat_stream(
             )
             
 
+            # 记录对话活动
+            log_user_activity(
+                db=db,
+                user=current_user,
+                activity_type=ActivityType.AGENT_CHAT if request.use_agent else ActivityType.CONVERSATION_CHAT,
+                description=f"发送流式消息: {request.message[:50]}...",
+                request=http_request,
+                resource_type="conversation",
+                resource_id=request.conversation_id or (result.get("data", {}).get("conversation_id") if result.get("success") else None),
+                metadata={
+                    "kb_id": request.kb_id,
+                    "use_agent": request.use_agent,
+                    "message_length": len(request.message),
+                    "is_stream": True
+                }
+            )
             
             if result["success"]:
                 response_data = result["data"]

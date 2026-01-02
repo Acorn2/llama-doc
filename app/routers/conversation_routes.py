@@ -18,8 +18,10 @@ from app.schemas import (
     ChatRequest,
     ChatStreamChunk,
     MessageResponse,
-    ChatResponse
+    ChatResponse,
+    ActivityType
 )
+from app.utils.activity_logger import log_user_activity
 from app.schemas.__init__ import (
     ConversationResponse,
     ConversationListResponse
@@ -66,9 +68,6 @@ async def create_conversation(
             title=request.title
         )
         
-        # 记录创建会话活动
-        from app.utils.activity_logger import log_user_activity
-        from app.schemas import ActivityType
         log_user_activity(
             db=db,
             user=current_user,
@@ -308,6 +307,7 @@ async def add_message(
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -391,6 +391,22 @@ async def chat(
             metadata=metadata
         )
         
+        # 记录对话活动
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.AGENT_CHAT if use_agent else ActivityType.CONVERSATION_CHAT,
+            description=f"发送消息: {request.message[:50]}...",
+            request=http_request,
+            resource_type="conversation",
+            resource_id=conversation_id,
+            metadata={
+                "kb_id": request.kb_id,
+                "use_agent": use_agent,
+                "message_length": len(request.message)
+            }
+        )
+        
         return ChatResponse(
             conversation_id=conversation_id,
             message=message_response,
@@ -407,6 +423,7 @@ async def chat(
 @router.post("/{conversation_id}/chat", response_model=ChatResponse)
 async def chat_in_conversation(
     conversation_id: str,
+    http_request: Request,
     message: str = Query(..., description="用户消息"),
     use_agent: bool = Query(False, description="是否使用Agent模式"),
     current_user: User = Depends(get_current_user),
@@ -427,16 +444,20 @@ async def chat_in_conversation(
     )
     
     # 调用聊天接口
-    return await chat(request, current_user, db)
+    return await chat(request, http_request, current_user, db)
 
 @router.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """流式聊天接口 - 创建或继续对话"""
     start_time = time.time()
+    
+    # 记录对话活动
+    use_agent = getattr(request, 'use_agent', False)
     
     try:
         # 如果没有提供对话ID，创建新对话
@@ -449,6 +470,23 @@ async def chat_stream(
                 title=None  # 使用默认标题
             )
             conversation_id = conversation.id
+        
+        # 记录对话活动
+        log_user_activity(
+            db=db,
+            user=current_user,
+            activity_type=ActivityType.AGENT_CHAT if use_agent else ActivityType.CONVERSATION_CHAT,
+            description=f"发送流式消息: {request.message[:50]}...",
+            request=http_request,
+            resource_type="conversation",
+            resource_id=conversation_id,
+            metadata={
+                "kb_id": request.kb_id,
+                "use_agent": use_agent,
+                "message_length": len(request.message),
+                "is_stream": True
+            }
+        )
         
         # 保存用户消息
         # conversation_manager.add_message(
@@ -567,6 +605,7 @@ async def chat_stream(
 @router.post("/{conversation_id}/chat/stream")
 async def chat_in_conversation_stream(
     conversation_id: str,
+    http_request: Request,
     message: str = Query(..., description="用户消息"),
     use_agent: bool = Query(False, description="是否使用Agent模式"),
     current_user: User = Depends(get_current_user),
@@ -587,4 +626,4 @@ async def chat_in_conversation_stream(
     )
     
     # 调用流式聊天接口
-    return await chat_stream(request, current_user, db) 
+    return await chat_stream(request, http_request, current_user, db)

@@ -5,7 +5,7 @@ import logging
 import uuid
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -242,14 +242,20 @@ class ActivityService:
                 # 如果KnowledgeBase表不存在或查询失败，使用默认值
                 total_kb_count = 0
             
-            # 获取今日对话统计
-            today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            # 获取今日对话统计（指今日新建的对话 thread）
+            # 使用带时区的时间对象，避免与数据库中带时区的字段比较时报错
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
-            today_conversations = db.query(UserActivity).filter(
-                UserActivity.user_id == user_id,
-                UserActivity.activity_type.in_(['conversation_chat', 'agent_chat']),
-                UserActivity.create_time >= today_start
-            ).count()
+            try:
+                from app.database import Conversation
+                today_conversations = db.query(Conversation).filter(
+                    Conversation.user_id == user_id,
+                    Conversation.create_time >= today_start,
+                    Conversation.status != "deleted"  # 排除已删除的对话
+                ).count()
+            except Exception as e:
+                logger.error(f"查询今日对话统计失败: {str(e)}")
+                today_conversations = 0
             
             return {
                 "document_count": total_doc_count,
