@@ -6,7 +6,7 @@ __pycache__/
 # C extensions
 *.so
 
-docs/
+# docs/ (Removed to allow documentation updates)
 .env.development
 .env.production
 

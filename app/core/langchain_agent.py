@@ -284,8 +284,9 @@ class LangChainDocumentAgent:
         self,
         message: str,
         conversation_id: Optional[str] = None,
-        use_agent: bool = True
-    ) -> Dict[str, Any]:
+        use_agent: bool = True,
+        stream: bool = False
+    ) -> Union[Dict[str, Any], Any]:
         """
         与Agent对话 - 增强错误处理，确保返回格式正确
         
@@ -293,22 +294,32 @@ class LangChainDocumentAgent:
             message: 用户消息
             conversation_id: 对话ID
             use_agent: 是否使用Agent模式
+            stream: 是否使用流式输出
             
         Returns:
-            Dict[str, Any]: 包含回复和元数据的响应
+            Union[Dict[str, Any], Any]: 包含回复和元数据的响应，或流生成器
         """
         start_time = time.time()
         current_timestamp = datetime.now().isoformat()
         
         try:
             if use_agent:
-                # 使用Agent模式 - 但避免使用可能有问题的agent_executor
+                # 使用Agent模式
                 try:
                     response = self.adapter.generate_agent_response(
                         kb_id=self.kb_id,
                         user_message=message,
-                        conversation_id=conversation_id
+                        conversation_id=conversation_id,
+                        stream=stream
                     )
+                    
+                    if stream:
+                        return {
+                            "success": True,
+                            "stream": response["stream"],
+                            "agent_used": True
+                        }
+                        
                     answer = response.get("answer", "抱歉，我无法处理您的请求。")
                     tools_used = ["agent_chain"] if response.get("agent_used", False) else []
                 except Exception as agent_error:
@@ -317,8 +328,18 @@ class LangChainDocumentAgent:
                     response = self.adapter.generate_conversation_response(
                         kb_id=self.kb_id,
                         conversation_id=conversation_id or "default",
-                        user_message=message
+                        user_message=message,
+                        stream=stream
                     )
+                    
+                    if stream:
+                        return {
+                            "success": True,
+                            "stream": response["stream"],
+                            "agent_used": False,
+                            "sources": response.get("sources", [])
+                        }
+                        
                     answer = response.get("answer", "抱歉，我无法处理您的请求。")
                     tools_used = []
             else:
@@ -326,8 +347,18 @@ class LangChainDocumentAgent:
                 response = self.adapter.generate_conversation_response(
                     kb_id=self.kb_id,
                     conversation_id=conversation_id or "default",
-                    user_message=message
+                    user_message=message,
+                    stream=stream
                 )
+                
+                if stream:
+                    return {
+                        "success": True,
+                        "stream": response["stream"],
+                        "agent_used": False,
+                        "sources": response.get("sources", [])
+                    }
+                    
                 answer = response.get("answer", "抱歉，我无法处理您的请求。")
                 tools_used = []
             

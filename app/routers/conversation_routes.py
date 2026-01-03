@@ -455,8 +455,6 @@ async def chat_stream(
 ):
     """流式聊天接口 - 创建或继续对话"""
     start_time = time.time()
-    
-    # 记录对话活动
     use_agent = getattr(request, 'use_agent', False)
     
     try:
@@ -488,64 +486,39 @@ async def chat_stream(
             }
         )
         
-        # 保存用户消息
-        # conversation_manager.add_message(
-        #     db=db,
-        #     conversation_id=conversation_id,
-        #     role="user",
-        #     content=request.message,
-        #     user_id=current_user.id
-        # )
-        
-        # 生成流式回复
-        use_agent = getattr(request, 'use_agent', False)
-        
-        # 导入打字机效果工具类
+        # 导入工具类
         from app.utils.streaming_utils import StreamingResponseBuilder, StreamingPresets
         
         if use_agent:
             # 使用Agent生成流式回复
-            adapter = get_langchain_adapter()
-            response = adapter.generate_agent_response(
+            from app.services.agent_service import AgentService
+            agent_service = AgentService()
+            
+            response = await agent_service.chat_with_agent(
+                db=db,
                 kb_id=request.kb_id,
-                user_message=request.message,
-                conversation_id=conversation_id
+                message=request.message,
+                conversation_id=conversation_id,
+                use_agent=True,
+                stream=True
             )
             
-            # 使用打字机效果输出Agent回复（这里仍然是伪流式，因为Agent暂不支持真流式）
-            async def generate_agent_stream():
-                # 根据回复长度选择合适的预设
-                answer = response["answer"]
-                response_length = len(answer)
-                
-                if response_length < 100:
-                    preset = StreamingPresets.FAST_NATURAL
-                elif response_length < 500:
-                    preset = StreamingPresets.NATURAL
-                else:
-                    preset = StreamingPresets.STANDARD
-                
-                # 创建流式响应
-                stream_generator = StreamingResponseBuilder.create_conversation_stream(
-                    response_text=answer,
-                    conversation_id=conversation_id,
-                    sources=response.get("sources", []),
-                    processing_time=time.time() - start_time,
-                    typewriter_config=preset
+            if response["success"]:
+                return StreamingResponse(
+                    StreamingResponseBuilder.create_realtime_stream(
+                        llm_stream_generator=response["stream"],
+                        conversation_id=conversation_id,
+                        metadata={"kb_id": request.kb_id, "use_agent": True},
+                        typewriter_config=StreamingPresets.FAST_NATURAL
+                    ),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache", 
+                        "Connection": "keep-alive"
+                    }
                 )
-                
-                async for chunk in stream_generator:
-                    yield chunk
-            
-            return StreamingResponse(
-                generate_agent_stream(),
-                media_type="text/plain",
-                headers={
-                    "Cache-Control": "no-cache", 
-                    "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
-                }
-            )
+            else:
+                raise ValueError(response.get("message", "Agent生成流式回复失败"))
         else:
             # 使用对话管理器生成真正的流式回复
             adapter = get_langchain_adapter()
@@ -558,49 +531,26 @@ async def chat_stream(
                 user_id=current_user.id
             )
             
-            # 真正的流式处理
-            async def generate_realtime_stream():
-                # 根据消息长度选择预设
-                message_length = len(request.message)
-                if message_length < 50:
-                    preset = StreamingPresets.FAST_NATURAL
-                elif message_length < 200:
-                    preset = StreamingPresets.NATURAL
-                else:
-                    preset = StreamingPresets.STANDARD
-                
-                # 创建真正的实时流式响应
-                metadata = {
-                    "conversation_id": conversation_id,
-                    "user_message_length": message_length
-                }
-                
-                stream_generator = StreamingResponseBuilder.create_realtime_stream(
+            return StreamingResponse(
+                StreamingResponseBuilder.create_realtime_stream(
                     llm_stream_generator=result["stream"],
                     conversation_id=conversation_id,
-                    metadata=metadata,
-                    typewriter_config=preset
-                )
-                
-                async for chunk in stream_generator:
-                    yield chunk
-            
-            return StreamingResponse(
-                generate_realtime_stream(),
-                media_type="text/plain",
+                    metadata={"kb_id": request.kb_id, "use_agent": False},
+                    typewriter_config=StreamingPresets.FAST_NATURAL
+                ),
+                media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache", 
-                    "Connection": "keep-alive",
-                    "Content-Type": "text/plain; charset=utf-8"
+                    "Connection": "keep-alive"
                 }
             )
         
     except ValueError as e:
-        logger.error(f"流式聊天失败: {str(e)}")
+        logger.error(f"流式聊天逻辑错误: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"流式聊天失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"流式聊天失败: {str(e)}")
+        logger.error(f"流式聊天系统异常: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{conversation_id}/chat/stream")
 async def chat_in_conversation_stream(

@@ -188,7 +188,8 @@ class AgentService:
         message: str,
         conversation_id: Optional[str] = None,
         use_agent: bool = True,
-        llm_type: str = "qwen"
+        llm_type: str = "qwen",
+        stream: bool = False
     ) -> Dict[str, Any]:
         """
         与Agent进行对话
@@ -200,6 +201,7 @@ class AgentService:
             conversation_id: 对话ID
             use_agent: 是否使用Agent模式
             llm_type: LLM类型
+            stream: 是否使用流式输出
             
         Returns:
             Dict[str, Any]: 对话结果
@@ -215,8 +217,32 @@ class AgentService:
             response = agent.chat(
                 message=message,
                 conversation_id=conversation_id,
-                use_agent=use_agent
+                use_agent=use_agent,
+                stream=stream
             )
+            
+            if stream:
+                # 处理流式返回
+                def generate_stream_wrapper():
+                    for chunk in response["stream"]:
+                        yield {
+                            "chunk": chunk,
+                            "is_final": False,
+                            "sources": response.get("sources", []),
+                            "conversation_id": conversation_id
+                        }
+                    
+                    yield {
+                        "chunk": "",
+                        "is_final": True,
+                        "sources": response.get("sources", []),
+                        "conversation_id": conversation_id
+                    }
+                
+                return {
+                    "success": True,
+                    "stream": generate_stream_wrapper()
+                }
             
             if not response["success"]:
                 raise AgentError(response.get("error", "Agent处理失败"))

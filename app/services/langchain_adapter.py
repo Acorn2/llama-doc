@@ -400,7 +400,8 @@ class LangChainAdapter:
         self, 
         kb_id: str, 
         user_message: str,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
+        stream: bool = False
     ) -> Dict[str, Any]:
         """
         使用Agent生成回复 - 直接使用LCEL链
@@ -409,21 +410,37 @@ class LangChainAdapter:
             kb_id: 知识库ID
             user_message: 用户消息
             conversation_id: 对话ID，可选
+            stream: 是否使用流式输出
             
         Returns:
-            Dict[str, Any]: 包含回复和元数据的字典
+            Dict[str, Any]: 包含回复和元数据的字典，或包含流生成器的字典
         """
         try:
             # 创建Agent（实际上是LCEL链）
             agent_chain = self.create_agent(kb_id, conversation_id)
             
-            # 直接使用LCEL链处理用户消息
-            answer = agent_chain.invoke(user_message)
-            
-            return {
-                "answer": answer,
-                "agent_used": True
-            }
+            if stream:
+                # 流式输出
+                def generate_stream():
+                    try:
+                        for chunk in agent_chain.stream(user_message):
+                            yield chunk
+                    except Exception as e:
+                        logger.error(f"Agent流式生成失败: {e}")
+                        yield f"抱歉，生成回复时发生错误: {str(e)}"
+                
+                return {
+                    "stream": generate_stream(),
+                    "agent_used": True
+                }
+            else:
+                # 直接使用LCEL链处理用户消息
+                answer = agent_chain.invoke(user_message)
+                
+                return {
+                    "answer": answer,
+                    "agent_used": True
+                }
             
         except Exception as e:
             logger.error(f"Agent生成回复失败: {e}")
